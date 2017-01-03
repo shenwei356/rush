@@ -24,8 +24,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	"github.com/spf13/cobra"
 )
 
 // VERSION of this package
@@ -33,19 +31,6 @@ const VERSION = "0.0.1"
 
 func isStdin(file string) bool {
 	return file == "-"
-}
-
-// Config is the struct containing all global flags
-type Config struct {
-	Ncpus   int
-	OutFile string
-}
-
-func getConfigs(cmd *cobra.Command) Config {
-	return Config{
-		Ncpus:   getFlagPositiveInt(cmd, "ncpus"),
-		OutFile: getFlagString(cmd, "out-file"),
-	}
 }
 
 func checkVersion() {
