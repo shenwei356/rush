@@ -1,10 +1,11 @@
 # rush -- parallelly execute shell commands
 
+
 ## Features
 
 Major:
 
-- [ ] argument delmiter (`-d`, default `\n`) and
+- [ ] argument delimiter (`-d`, default `\n`) and
   lines sending to every command (`-n`, default `1`)
 - [ ] keep output order, may use temporary file
 - [ ] support timeout and retry
@@ -25,13 +26,34 @@ Major:
         - [ ] `{%.}`, `{%,}`
         - [ ] `{n.}`, `{n/}` ...
 - [ ] `awk -v` like defined variables
+- [ ] appropriate quoting
 
 Minor:
 
 - [ ] logging
 - [ ] dry run
 - [ ] exit on error
+- [ ] trim arguments
+- [ ] verbose
 
+## Workflow
+
+1. read data from STDIN (default) or files (`-f`)
+1. split N lines (`-n`, default `1`) of data by delimiter (`-d`, default `\n`)
+1. send splitted data to W workers (`-j`, default `#. CPUs`)
+1. workers run commands in parallel
+    1. worker replaces placeholders in command (by joining arguments) with input data
+    1. optionally (`--dry-run`) print command and not run
+    1. retry if fail to run, give up when reached the maximum retry times (`-r`)
+    1. cancel if time out (`-t`)
+    1. optionally (`-e`) stop all worers and exit if error occured
+    1. output failed comands to file (`failed.txt`),
+       so we can redo them (`rush -f failed.txt`)
+    1. optionally (`-c`) save finished commands to file (`finished.txt`),
+       so we can ignore them when run in "continue" mode (`-c`)
+1. show STDOUT of commands to STDOUT,
+   optionally (`-k`) keep order according to the input data
+1. show simple summary when all data processed
 
 ## Contact
 
