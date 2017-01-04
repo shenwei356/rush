@@ -5,27 +5,26 @@
 
 Major:
 
-- [ ] record delimiter (`-D`, default `\n`),
+- [x] record delimiter (`-D`, default `\n`),
   records sending to every command (`-n`, default `1`),
   and field delimiter (`-d`, default `\s+`).
-- [ ] keep output order, may use temporary file
+- [x] keep output order, may use temporary file
 - [ ] support timeout and retry
 - [ ] support continue,
   save status after [capturing ctrl+c](https://nathanleclaire.com/blog/2014/08/24/handling-ctrl-c-interrupt-signal-in-golang-programs/)
-- [ ] support positional replacement strings: `{n}`
-    - [ ] columns in delimiter-delimited data
-    - [ ] matches of regular expression
-- [ ] GNU parallel like replacement strings:
-    - [ ] `{@}`, job slot number (`{%}` in GNU parallel)
-    - [ ] `{#}`, job number
-    - [ ] `{}`, full line
-    - [ ] `{.}`, input line without the last extension
-    - [ ] `{,}`, input line without any extension (GNU parallel does not have)
-    - [ ] `{/}`, dirname  (`{//}` in GNU parallel)
-    - [ ] `{%}`, basename (`{/}` in GNU parallel)
-    - [ ] possible combinations:
-        - [ ] `{%.}`, `{%,}`
-        - [ ] `{n.}`, `{n/}` ...
+- [x] support positional replacement strings: `{n}`
+    - [x] columns in delimiter-delimited data
+    - [x] matches of regular expression
+- [x] GNU parallel like replacement strings:
+    - [x] `{#}`, job number
+    - [x] `{}`, full line
+    - [x] `{.}`, input line without the last extension
+    - [x] `{:}`, input line without any extension (GNU parallel does not have)
+    - [x] `{/}`, dirname  (`{//}` in GNU parallel)
+    - [x] `{%}`, basename (`{/}` in GNU parallel)
+    - [x] possible combinations:
+        - [x] `{%.}`, `{%,}`
+        - [x] `{n.}`, `{n/}` ...
 - [ ] `awk -v` like defined variables
 - [ ] appropriate quoting
 

@@ -19,3 +19,90 @@
 // THE SOFTWARE.
 
 package cmd
+
+import (
+	"bytes"
+	"fmt"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var rePlaceHolder = regexp.MustCompile(`\{([^\}]*)\}`)
+var reChars = regexp.MustCompile(`\d+|.`)
+var reCharsCheck = regexp.MustCompile(`^(\d+)*[^\d]*$`)
+
+func fillCommand(config Config, command string, chunk Chunk) string {
+	founds := rePlaceHolder.FindAllStringSubmatchIndex(command, -1)
+	if len(founds) == 0 {
+		return command + "\n"
+	}
+	fieldsStr := strings.Join(chunk.Data, config.RecordDelimiter)
+	var fields []string
+	if config.RecordDelimiter == config.FieldDelimiter {
+		fields = chunk.Data
+	} else {
+		fields = config.reFieldDelimiter.Split(fieldsStr, -1)
+	}
+
+	var chars, char, target string
+	var charsGroups []string
+	var i, j int
+	var buf bytes.Buffer
+	for _, found := range founds {
+		chars = command[found[2]:found[3]]
+
+		if chars == "" {
+			target = fieldsStr
+		} else {
+			if !reCharsCheck.MatchString(chars) {
+				checkError(fmt.Errorf("illegal placeholder: {%s}", chars))
+			}
+			charsGroups = reChars.FindAllString(chars, -1)
+
+			char = charsGroups[0]
+			if char[0] >= 48 && char[0] <= 57 { // digits, handle specific field
+				i, _ = strconv.Atoi(char)
+				if i == 0 {
+					target = fieldsStr
+				} else {
+					if i > len(fields) {
+						i = len(fields)
+					}
+					target = fields[i-1]
+				}
+				i = 1
+			} else { // handle whole fieldStr
+				target = fieldsStr
+				i = 0
+			}
+
+			for _, char = range charsGroups[i:] {
+				switch char {
+				case "#": // job number
+					target = fmt.Sprintf("%d", chunk.ID)
+				case ".": // remove last extension
+					i = strings.LastIndex(target, ".")
+					if i > 0 {
+						target = target[0:i]
+					}
+				case ":": //remove any extension
+					i = strings.Index(target, ".")
+					if i > 0 {
+						target = target[0:i]
+					}
+				case "/": //dirname
+					target = filepath.Dir(target)
+				case "%":
+					target = filepath.Base(target)
+				}
+			}
+		}
+
+		buf.WriteString(command[j:found[0]])
+		buf.WriteString(target)
+		j = found[3] + 1
+	}
+	return buf.String()
+}

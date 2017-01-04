@@ -25,10 +25,13 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
+	"github.com/cznic/sortutil"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -49,14 +52,25 @@ Source code: https://github.com/shenwei356/rush
 
 `, VERSION),
 	Run: func(cmd *cobra.Command, args []string) {
+		var err error
 		config := getConfigs(cmd)
+
+		// if config.NRecords > 1 {
+		// 	config.FieldDelimiter = "\n"
+		// }
+		config.reFieldDelimiter, err = regexp.Compile(config.FieldDelimiter)
+		checkError(errors.Wrap(err, "compile field delimiter"))
+
+		command := strings.Join(args, " ")
+		if command == "" {
+			command = "echo {}"
+		}
 
 		if config.Version {
 			checkVersion()
 			return
 		}
 
-		var err error
 		var outfh *os.File
 		if isStdin(config.OutFile) {
 			outfh = os.Stdout
@@ -99,6 +113,67 @@ Source code: https://github.com/shenwei356/rush
 			// channel of input data
 			chIn := make(chan Chunk, config.Ncpus)
 
+			// ---------------------------------------------------------------
+			// output
+			// channel of output data
+			chOut := make(chan Chunk, config.Ncpus)
+			doneChOut := make(chan int)
+			go func() {
+				var line string
+				if !config.KeepOrder { // do not keep order
+					for c := range chOut {
+						for _, line = range c.Data {
+							outfh.WriteString(line)
+						}
+					}
+				} else {
+					var id uint64 = 1
+					var c, c1 Chunk
+					var ok bool
+					chunks := make(map[uint64]Chunk)
+					for c = range chOut {
+						if c.ID == id { // your turn
+							for _, line = range c.Data {
+								outfh.WriteString(line)
+							}
+
+							id++
+						} else { // wait the ID come out
+							for true {
+								if c1, ok = chunks[id]; ok {
+									for _, line = range c.Data {
+										outfh.WriteString(line)
+									}
+
+									delete(chunks, c1.ID)
+									id++
+								} else {
+									break
+								}
+							}
+							chunks[c.ID] = c
+						}
+					}
+					if len(chunks) > 0 {
+						ids := make(sortutil.Uint64Slice, len(chunks))
+						i := 0
+						for id = range chunks {
+							ids[i] = id
+							i++
+						}
+						sort.Sort(ids)
+						for _, id = range ids {
+							c := chunks[id]
+							for _, line = range c.Data {
+								outfh.WriteString(line)
+							}
+						}
+					}
+				}
+				doneChOut <- 1
+			}()
+
+			// ---------------------------------------------------------------
 			// producer
 			go func() {
 				defer close(chIn)
@@ -108,7 +183,7 @@ Source code: https://github.com/shenwei356/rush
 
 				n := config.NRecords
 				// lenRD := len(config.RecordDelimiter)
-				var id uint64
+				var id uint64 = 1
 
 				var records []string
 				records = make([]string, 0, n)
@@ -130,9 +205,10 @@ Source code: https://github.com/shenwei356/rush
 					id++
 				}
 
-				checkError(errors.Wrap(scanner.Err(), "read data"))
+				checkError(errors.Wrap(scanner.Err(), "read input data"))
 			}()
 
+			// ---------------------------------------------------------------
 			// consumer
 			var wg sync.WaitGroup
 			tokens := make(chan int, config.Ncpus)
@@ -146,17 +222,23 @@ Source code: https://github.com/shenwei356/rush
 						<-tokens
 					}()
 
-					outfh.WriteString(fmt.Sprintf("%d: {%s}\n\n", c.ID, strings.Join(c.Data, config.RecordDelimiter)))
+					// worker
+					chOut <- Chunk{
+						ID:   c.ID,
+						Data: []string{fillCommand(config, command, c) + "\n"},
+					}
+
 				}(c)
 			}
 
-			wg.Wait()
+			wg.Wait()    // wait workers done
+			close(chOut) // close output chanel
+			<-doneChOut  // wait output done
 		}
-
 	},
 }
 
-// Chunk is data sent to workers
+// Chunk is []string with ID
 type Chunk struct {
 	ID   uint64
 	Data []string
@@ -204,9 +286,10 @@ type Config struct {
 
 	Infiles []string
 
-	RecordDelimiter string
-	NRecords        int
-	FieldDelimiter  string
+	RecordDelimiter  string
+	NRecords         int
+	FieldDelimiter   string
+	reFieldDelimiter *regexp.Regexp
 
 	Retries       int
 	RetryInterval int
