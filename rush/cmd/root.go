@@ -27,7 +27,9 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -84,6 +86,7 @@ Source code: https://github.com/shenwei356/rush
 		}
 
 		for _, file := range config.Infiles {
+			// input file handle
 			var infh *os.File
 			if isStdin(file) {
 				infh = os.Stdin
@@ -126,13 +129,28 @@ Source code: https://github.com/shenwei356/rush
 					chIn <- Chunk{ID: id, Data: records}
 					id++
 				}
-				checkError(scanner.Err())
+
+				checkError(errors.Wrap(scanner.Err(), "read data"))
 			}()
 
-			// worker
+			// consumer
+			var wg sync.WaitGroup
+			tokens := make(chan int, config.Ncpus)
+
 			for c := range chIn {
-				outfh.WriteString(fmt.Sprintf("%d: {%s}\n\n", c.ID, strings.Join(c.Data, config.RecordDelimiter)))
+				wg.Add(1)
+				tokens <- 1
+				go func(c Chunk) {
+					defer func() {
+						wg.Done()
+						<-tokens
+					}()
+
+					outfh.WriteString(fmt.Sprintf("%d: {%s}\n\n", c.ID, strings.Join(c.Data, config.RecordDelimiter)))
+				}(c)
 			}
+
+			wg.Wait()
 		}
 
 	},
