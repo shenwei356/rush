@@ -49,7 +49,7 @@ Source code: https://github.com/shenwei356/rush
 	Run: func(cmd *cobra.Command, args []string) {
 		config := getConfigs(cmd)
 
-		if getFlagBool(cmd, "version") {
+		if config.Version {
 			checkVersion()
 			return
 		}
@@ -64,9 +64,8 @@ Source code: https://github.com/shenwei356/rush
 			checkError(err)
 		}
 
-		infiles := getFlagStringSlice(cmd, "infile")
-		if len(infiles) == 0 {
-			infiles = append(infiles, "-")
+		if len(config.Infiles) == 0 {
+			config.Infiles = append(config.Infiles, "-")
 		}
 
 		split := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
@@ -75,7 +74,8 @@ Source code: https://github.com/shenwei356/rush
 			}
 			i := bytes.IndexAny(data, config.RecordDelimiter)
 			if i >= 0 {
-				return i + 1, data[0 : i+1], nil
+				return i + 1, data[0:i], nil // trim config.RecordDelimiter
+				// return i + 1, data[0 : i+1], nil
 			}
 			if atEOF {
 				return len(data), data, nil
@@ -83,7 +83,7 @@ Source code: https://github.com/shenwei356/rush
 			return 0, nil, nil
 		}
 
-		for _, file := range infiles {
+		for _, file := range config.Infiles {
 			var infh *os.File
 			if isStdin(file) {
 				infh = os.Stdin
@@ -93,28 +93,55 @@ Source code: https://github.com/shenwei356/rush
 				defer infh.Close()
 			}
 
-			scanner := bufio.NewScanner(infh)
-			scanner.Buffer(make([]byte, 0, 16384), 2147483648)
-			scanner.Split(split)
+			// channel of input data
+			chIn := make(chan Chunk, config.Ncpus)
 
-			// go func() {
-			var records []string
-			records = make([]string, 0, config.NRecords)
-			for scanner.Scan() {
-				records = append(records, scanner.Text())
-				if len(records) == config.NRecords {
-					outfh.WriteString(fmt.Sprintf("{\n%s}\n\n", strings.Join(records, "")))
-					records = make([]string, 0, config.NRecords)
+			// producer
+			go func() {
+				defer close(chIn)
+				scanner := bufio.NewScanner(infh)
+				scanner.Buffer(make([]byte, 0, 16384), 2147483648)
+				scanner.Split(split)
+
+				n := config.NRecords
+				// lenRD := len(config.RecordDelimiter)
+				var id uint64
+
+				var records []string
+				records = make([]string, 0, n)
+				for scanner.Scan() {
+					records = append(records, scanner.Text())
+
+					if len(records) == n {
+						// remove last config.RecordDelimiter
+						// records[len(records)-1] = records[len(records)-1][0 : len(records[len(records)-1])-lenRD]
+						chIn <- Chunk{ID: id, Data: records}
+						id++
+						records = make([]string, 0, n)
+					}
 				}
+				if len(records) > 0 {
+					// remove last config.RecordDelimiter
+					// records[len(records)-1] = records[len(records)-1][0 : len(records[len(records)-1])-lenRD]
+					chIn <- Chunk{ID: id, Data: records}
+					id++
+				}
+				checkError(scanner.Err())
+			}()
+
+			// worker
+			for c := range chIn {
+				outfh.WriteString(fmt.Sprintf("%d: {%s}\n\n", c.ID, strings.Join(c.Data, config.RecordDelimiter)))
 			}
-			if len(records) > 0 {
-				outfh.WriteString(fmt.Sprintf("{\n%s}\n\n", strings.Join(records, "")))
-			}
-			checkError(scanner.Err())
-			// }()
 		}
 
 	},
+}
+
+// Chunk is data sent to workers
+type Chunk struct {
+	ID   uint64
+	Data []string
 }
 
 // Execute adds all child commands to the root command sets flags appropriately.
