@@ -45,11 +45,10 @@ Minor:
     1. optinally split input data by field delimiter (`-d`, default `\s+`)
     1. worker replaces placeholders in command (by joining arguments) with input data
     1. optionally (`--dry-run`) print command and not run
-    1. retry if fail to run, give up when reached the maximum retry times (`-r`)
+    1. retry if fail to run, give up when reached the max retry times (`-r`)
     1. cancel if time out (`-t`)
     1. optionally (`-e`) stop all worers and exit if error occured
-    1. output failed comands to file (`failed.txt`),
-       so we can redo them (`rush -i failed.txt`)
+    1. output failed comands to file (`failed.txt`), so we can redo them (`rush -i failed.txt`)
     1. optionally (`-c`) save finished commands to file (`finished.txt`),
        so we can ignore them when run in "continue" mode (`-c`)
 1. show STDOUT of commands to STDOUT,

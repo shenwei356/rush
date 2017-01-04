@@ -55,9 +55,12 @@ Source code: https://github.com/shenwei356/rush
 		var err error
 		config := getConfigs(cmd)
 
-		// if config.NRecords > 1 {
-		// 	config.FieldDelimiter = "\n"
-		// }
+		j := config.Ncpus
+		if j > runtime.NumCPU() {
+			j = runtime.NumCPU()
+		}
+		runtime.GOMAXPROCS(j)
+
 		config.reFieldDelimiter, err = regexp.Compile(config.FieldDelimiter)
 		checkError(errors.Wrap(err, "compile field delimiter"))
 
@@ -141,7 +144,7 @@ Source code: https://github.com/shenwei356/rush
 						} else { // wait the ID come out
 							for true {
 								if c1, ok = chunks[id]; ok {
-									for _, line = range c.Data {
+									for _, line = range c1.Data {
 										outfh.WriteString(line)
 									}
 
@@ -257,7 +260,7 @@ func init() {
 	RootCmd.Flags().BoolP("verbose", "v", false, "print verbose information")
 	RootCmd.Flags().BoolP("version", "V", false, `print version information and check for update`)
 
-	RootCmd.Flags().IntP("ncpus", "j", runtime.NumCPU(), "number of CPUs")
+	RootCmd.Flags().IntP("ncpus", "j", runtime.NumCPU(), "run n jobs in parallel")
 	RootCmd.Flags().StringP("out-file", "o", "-", `out file ("-" for stdout)`)
 
 	RootCmd.Flags().StringSliceP("infile", "i", []string{}, "input data file")
