@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cznic/sortutil"
 	"github.com/pkg/errors"
@@ -55,25 +56,29 @@ Source code: https://github.com/shenwei356/rush
 		var err error
 		config := getConfigs(cmd)
 
-		j := config.Ncpus
-		if j > runtime.NumCPU() {
-			j = runtime.NumCPU()
-		}
-		runtime.GOMAXPROCS(j)
-
-		config.reFieldDelimiter, err = regexp.Compile(config.FieldDelimiter)
-		checkError(errors.Wrap(err, "compile field delimiter"))
-
-		command := strings.Join(args, " ")
-		if command == "" {
-			command = "echo {}"
-		}
-
 		if config.Version {
 			checkVersion()
 			return
 		}
 
+		j := config.Ncpus + 1
+		if j > runtime.NumCPU() {
+			j = runtime.NumCPU()
+		}
+		runtime.GOMAXPROCS(j)
+
+		DataBuffer = config.BufferSize
+		ChanBuffer = config.Ncpus
+
+		config.reFieldDelimiter, err = regexp.Compile(config.FieldDelimiter)
+		checkError(errors.Wrap(err, "compile field delimiter"))
+
+		command0 := strings.Join(args, " ")
+		if command0 == "" {
+			command0 = "echo {}"
+		}
+
+		// out file handler
 		var outfh *os.File
 		if isStdin(config.OutFile) {
 			outfh = os.Stdout
@@ -103,7 +108,7 @@ Source code: https://github.com/shenwei356/rush
 		}
 
 		for _, file := range config.Infiles {
-			// input file handle
+			// input file handler
 			var infh *os.File
 			if isStdin(file) {
 				infh = os.Stdin
@@ -118,62 +123,128 @@ Source code: https://github.com/shenwei356/rush
 
 			// ---------------------------------------------------------------
 			// output
-			// channel of output data
-			chOut := make(chan Chunk, config.Ncpus)
-			doneChOut := make(chan int)
+			// channel of Command
+			chCmd := make(chan *Command, config.Ncpus)
+			chOut := make(chan string, config.Ncpus)
+
+			var wgOut sync.WaitGroup
+			cancelOut := make(chan struct{})
+			doneOut := make(chan int)
+
+			doneWholeOut := make(chan int)
 			go func() {
-				var line string
-				if !config.KeepOrder { // do not keep order
+				// read from chOut and print
+				go func() {
 					for c := range chOut {
-						for _, line = range c.Data {
-							outfh.WriteString(line)
-						}
+						outfh.WriteString(c)
+					}
+					doneOut <- 1
+				}()
+
+				if !config.KeepOrder { // do not keep order
+					// fan in
+					tokens := make(chan int, config.Ncpus)
+					var line string
+					for c := range chCmd {
+						wgOut.Add(1)
+						tokens <- 1
+						go func(cancel chan struct{}, c *Command) {
+							defer func() {
+								wgOut.Done()
+								<-tokens
+							}()
+
+							// output the command name
+							if config.DryRun {
+								chOut <- c.Cmd + "\n"
+								return
+							}
+
+							// read data from channel and outpput
+						LOOP:
+							for {
+								select {
+								case chOut <- <-c.Ch:
+								case <-cancel:
+									break LOOP
+								}
+								if c.Done {
+									// do not forget left data
+									for line = range c.Ch {
+										chOut <- line
+									}
+									checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
+									break LOOP
+								}
+							}
+						}(cancelOut, c)
 					}
 				} else {
+					wgOut.Add(1)
+
 					var id uint64 = 1
-					var c, c1 Chunk
+					var c, c1 *Command
 					var ok bool
-					chunks := make(map[uint64]Chunk)
-					for c = range chOut {
+					var line string
+					cmds := make(map[uint64]*Command)
+					for c = range chCmd {
 						if c.ID == id { // your turn
-							for _, line = range c.Data {
-								outfh.WriteString(line)
+							if config.DryRun {
+								chOut <- c.Cmd + "\n"
+							} else {
+								for line = range c.Ch {
+									chOut <- line
+								}
+								checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
 							}
 
 							id++
 						} else { // wait the ID come out
 							for true {
-								if c1, ok = chunks[id]; ok {
-									for _, line = range c1.Data {
-										outfh.WriteString(line)
+								if c1, ok = cmds[id]; ok {
+									if config.DryRun {
+										chOut <- c1.Cmd + "\n"
+									} else {
+										for line = range c1.Ch {
+											chOut <- line
+										}
+										checkError(errors.Wrapf(c1.Cleanup(), "remove tmpfile for cmd: %s", c1.Cmd))
 									}
 
-									delete(chunks, c1.ID)
+									delete(cmds, c1.ID)
 									id++
 								} else {
 									break
 								}
 							}
-							chunks[c.ID] = c
+							cmds[c.ID] = c
 						}
 					}
-					if len(chunks) > 0 {
-						ids := make(sortutil.Uint64Slice, len(chunks))
+					if len(cmds) > 0 {
+						ids := make(sortutil.Uint64Slice, len(cmds))
 						i := 0
-						for id = range chunks {
+						for id = range cmds {
 							ids[i] = id
 							i++
 						}
 						sort.Sort(ids)
 						for _, id = range ids {
-							c := chunks[id]
-							for _, line = range c.Data {
-								outfh.WriteString(line)
+							c := cmds[id]
+							if config.DryRun {
+								chOut <- c.Cmd + "\n"
+							} else {
+								for line = range c.Ch {
+									chOut <- line
+								}
+								checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
 							}
 						}
 					}
+
+					wgOut.Done()
 				}
-				doneChOut <- 1
+
+				doneWholeOut <- 1
 			}()
 
 			// ---------------------------------------------------------------
@@ -185,7 +256,6 @@ Source code: https://github.com/shenwei356/rush
 				scanner.Split(split)
 
 				n := config.NRecords
-				// lenRD := len(config.RecordDelimiter)
 				var id uint64 = 1
 
 				var records []string
@@ -194,16 +264,12 @@ Source code: https://github.com/shenwei356/rush
 					records = append(records, scanner.Text())
 
 					if len(records) == n {
-						// remove last config.RecordDelimiter
-						// records[len(records)-1] = records[len(records)-1][0 : len(records[len(records)-1])-lenRD]
 						chIn <- Chunk{ID: id, Data: records}
 						id++
 						records = make([]string, 0, n)
 					}
 				}
 				if len(records) > 0 {
-					// remove last config.RecordDelimiter
-					// records[len(records)-1] = records[len(records)-1][0 : len(records[len(records)-1])-lenRD]
 					chIn <- Chunk{ID: id, Data: records}
 					id++
 				}
@@ -213,30 +279,42 @@ Source code: https://github.com/shenwei356/rush
 
 			// ---------------------------------------------------------------
 			// consumer
-			var wg sync.WaitGroup
+			var wgWorkers sync.WaitGroup
 			tokens := make(chan int, config.Ncpus)
-
 			for c := range chIn {
-				wg.Add(1)
+				wgWorkers.Add(1)
 				tokens <- 1
 				go func(c Chunk) {
 					defer func() {
-						wg.Done()
+						wgWorkers.Done()
 						<-tokens
 					}()
 
-					// worker
-					chOut <- Chunk{
-						ID:   c.ID,
-						Data: []string{fillCommand(config, command, c) + "\n"},
+					command := NewCommand(c.ID,
+						fillCommand(config, command0, c),
+						time.Duration(config.Timeout)*time.Second)
+
+					// dry run
+					if config.DryRun {
+						chCmd <- command
+						return
 					}
 
+					err = command.Run()
+					checkError(err)
+					chCmd <- command
 				}(c)
 			}
 
-			wg.Wait()    // wait workers done
+			// the order is very important!
+			wgWorkers.Wait() // wait workers done
+
+			close(chCmd) // close Cmd channel
+			wgOut.Wait() //
 			close(chOut) // close output chanel
-			<-doneChOut  // wait output done
+
+			<-doneOut      // finish output
+			<-doneWholeOut // wait output done
 		}
 	},
 }
@@ -245,6 +323,12 @@ Source code: https://github.com/shenwei356/rush
 type Chunk struct {
 	ID   uint64
 	Data []string
+}
+
+// ChunkCommand is
+type ChunkCommand struct {
+	ID  uint64
+	Cmd *Command
 }
 
 // Execute adds all child commands to the root command sets flags appropriately.
@@ -276,7 +360,9 @@ func init() {
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
 	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on any error")
 	RootCmd.Flags().BoolP("continue", "c", false, `continue run commands except for finished commands in "finished.txt"`)
+	RootCmd.Flags().BoolP("dry-run", "", false, "print command but not run")
 
+	RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of command before saving to tmpfile (unit: Mb)")
 }
 
 // Config is the struct containing all global flags
@@ -301,6 +387,9 @@ type Config struct {
 	KeepOrder bool
 	StopOnErr bool
 	Continue  bool
+	DryRun    bool
+
+	BufferSize int
 }
 
 func getConfigs(cmd *cobra.Command) Config {
@@ -324,5 +413,8 @@ func getConfigs(cmd *cobra.Command) Config {
 		KeepOrder: getFlagBool(cmd, "keep-order"),
 		StopOnErr: getFlagBool(cmd, "stop-on-error"),
 		Continue:  getFlagBool(cmd, "continue"),
+		DryRun:    getFlagBool(cmd, "dry-run"),
+
+		BufferSize: getFlagPositiveInt(cmd, "buffer-size") * 1048576,
 	}
 }

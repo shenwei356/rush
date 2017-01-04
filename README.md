@@ -31,7 +31,7 @@ Major:
 Minor:
 
 - [ ] logging
-- [ ] dry run
+- [x] dry run
 - [ ] exit on error
 - [ ] trim arguments
 - [ ] verbose

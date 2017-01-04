@@ -104,5 +104,6 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 		buf.WriteString(target)
 		j = found[3] + 1
 	}
+	buf.WriteString(command[j:])
 	return buf.String()
 }
