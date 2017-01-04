@@ -79,14 +79,18 @@ Source code: https://github.com/shenwei356/rush
 		}
 
 		// out file handler
-		var outfh *os.File
+		var outfh *bufio.Writer
 		if isStdin(config.OutFile) {
-			outfh = os.Stdout
+			outfh = bufio.NewWriter(os.Stdout)
 		} else {
-			outfh, err = os.Create(config.OutFile)
-			defer outfh.Close()
+			var fh *os.File
+			fh, err = os.Create(config.OutFile)
+			defer fh.Close()
+
+			outfh = bufio.NewWriter(fh)
 			checkError(err)
 		}
+		defer outfh.Flush()
 
 		if len(config.Infiles) == 0 {
 			config.Infiles = append(config.Infiles, "-")
@@ -135,9 +139,17 @@ Source code: https://github.com/shenwei356/rush
 			go func() {
 				// read from chOut and print
 				go func() {
+					last := time.Now().Add(2 * time.Second)
 					for c := range chOut {
 						outfh.WriteString(c)
+
+						if t := time.Now(); t.After(last) {
+							outfh.Flush()
+							last = t.Add(2 * time.Second)
+						}
 					}
+					outfh.Flush()
+
 					doneOut <- 1
 				}()
 
