@@ -69,6 +69,7 @@ Source code: https://github.com/shenwei356/rush
 
 		DataBuffer = config.BufferSize
 		ChanBuffer = config.Ncpus
+		Verbose = config.Verbose
 
 		config.reFieldDelimiter, err = regexp.Compile(config.FieldDelimiter)
 		checkError(errors.Wrap(err, "compile field delimiter"))

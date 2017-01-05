@@ -1,4 +1,7 @@
 *.directory
 rush/rush*
 rush/binaries*
+rush/t.*
+rush/pprof
+rush/mprof
 doc/site*

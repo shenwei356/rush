@@ -21,20 +21,21 @@
 package main
 
 import (
-	// "runtime/pprof"
+	"os"
+	"runtime/pprof"
 
 	"github.com/shenwei356/rush/rush/cmd"
 )
 
 func main() {
-	// go tool pprof ./taxonkit pprof
-	// f, _ := os.Create("pprof")
-	// pprof.StartCPUProfile(f)
-	// defer pprof.StopCPUProfile()
+	// go tool pprof ./rush pprof
+	f, _ := os.Create("pprof")
+	pprof.StartCPUProfile(f)
+	defer pprof.StopCPUProfile()
 
 	cmd.Execute()
 
-	// go tool pprof --alloc_space ./taxonkit mprof
+	// go tool pprof --alloc_space ./rush mprof
 	// f2, _ := os.Create("mprof")
 	// pprof.WriteHeapProfile(f2)
 	// defer f2.Close()

@@ -63,6 +63,9 @@ func NewCommand(id uint64, cmdStr string, timeout time.Duration) *Command {
 	return command
 }
 
+// Verbose prints extra information
+var Verbose bool
+
 var tmpfilePrefix = fmt.Sprintf("rush.%d.", os.Getpid())
 
 // DataBuffer is buffer size for output of command before saving to tmpfile
@@ -82,12 +85,9 @@ func (c *Command) Run() error {
 		}
 
 		if c.tmpfile != "" { // data saved in tempfile
-			// fmt.Printf("read tmpfile data from: %s\n", c.Cmd)
-			c.tmpfh, c.Err = os.Open(c.tmpfile)
-			defer c.tmpfh.Close()
+			// c.tmpfh, c.Err = os.Open(c.tmpfile)
+			// defer c.tmpfh.Close()
 			c.reader = bufio.NewReader(c.tmpfh)
-		} else {
-			// fmt.Printf("read live data from: %s\n", c.Cmd)
 		}
 
 		var line string
@@ -120,11 +120,24 @@ func getShell() string {
 
 // Cleanup remove tmpfile
 func (c *Command) Cleanup() error {
-	if c.tmpfile != "" {
-		// fmt.Printf("remove tmpfile: %s for cmd: %s\n", c.tmpfile, c.Cmd)
-		return os.Remove(c.tmpfile)
+	var err error
+	if c.tmpfh != nil {
+		if Verbose {
+			log.Infof("close tmpfh for: %s\n", c.Cmd)
+		}
+		err = c.tmpfh.Close()
+		if err != nil {
+			return err
+		}
 	}
-	return nil
+
+	if c.tmpfile != "" {
+		if Verbose {
+			log.Infof("remove tmpfile of command: %s\n", c.Cmd)
+		}
+		err = os.Remove(c.tmpfile)
+	}
+	return err
 }
 
 // ExitCode returns exit code
@@ -143,6 +156,10 @@ func (c *Command) ExitCode() int {
 func (c *Command) run() error {
 	var command *exec.Cmd
 	qcmd := fmt.Sprintf(`%s`, c.Cmd)
+	if Verbose {
+		log.Infof("run command: %s", qcmd)
+	}
+
 	if c.Timeout > 0 {
 		c.ctx, c.cancel = context.WithTimeout(context.Background(), c.Timeout)
 		command = exec.CommandContext(c.ctx, getShell(), "-c", qcmd)
@@ -178,7 +195,9 @@ func (c *Command) run() error {
 		return nil
 	}
 
-	// fmt.Printf("create tmpfile for command: %s\n", c.Cmd)
+	if Verbose {
+		log.Infof("create tmpfile for command: %s\n", c.Cmd)
+	}
 
 	// more than DataBuffer bytes in output. must use tmpfile
 	if err != nil {
@@ -189,7 +208,7 @@ func (c *Command) run() error {
 	if err != nil {
 		return errors.Wrapf(err, "create tmpfile for command: %s", c.Cmd)
 	}
-	defer c.tmpfh.Close()
+	// defer c.tmpfh.Close()
 
 	c.tmpfile = c.tmpfh.Name()
 
@@ -203,9 +222,16 @@ func (c *Command) run() error {
 		c.Close()
 	}
 	btmp.Flush()
-	err = command.Wait()
+	_, err = c.tmpfh.Seek(0, 0)
+	if err == nil {
+		err = command.Wait()
+	}
 	if err != nil {
 		return errors.Wrapf(err, "wait command: %s", c.Cmd)
+	}
+
+	if Verbose {
+		log.Infof("finished: %s\n", c.Cmd)
 	}
 
 	return nil
