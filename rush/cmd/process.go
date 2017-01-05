@@ -83,7 +83,7 @@ var TmpOutputDataBuffer = 1048576 // 1M
 // OutputChunkSize is buffer size of output string chunk sent to channel, default 16K.
 var OutputChunkSize = 16384 // 16K
 
-// Run starts to run
+// Run runs a command and send output to command.Ch in background.
 func (c *Command) Run() error {
 	c.Ch = make(chan string, runtime.NumCPU())
 
@@ -93,7 +93,7 @@ func (c *Command) Run() error {
 	}
 
 	if Verbose {
-		log.Infof("finished command in %s: %s", c.Duration, c.Cmd)
+		log.Infof("finish cmd #%d in %s: %s", c.ID, c.Duration, c.Cmd)
 	}
 
 	go func() {
@@ -115,9 +115,9 @@ func (c *Command) Run() error {
 			c.Ch <- string(buf[0:n])
 		}
 
-		if Verbose {
-			log.Infof("finished reading data from: %s", c.Cmd)
-		}
+		// if Verbose {
+		// 	log.Infof("finish reading data from: %s", c.Cmd)
+		// }
 
 		close(c.Ch)
 		c.finishSendOutput = true
@@ -137,9 +137,9 @@ func getShell() string {
 func (c *Command) Cleanup() error {
 	var err error
 	if c.tmpfh != nil {
-		if Verbose {
-			log.Infof("close tmpfh for: %s", c.Cmd)
-		}
+		// if Verbose {
+		// 	log.Infof("close tmpfh for: %s", c.Cmd)
+		// }
 		err = c.tmpfh.Close()
 		if err != nil {
 			return err
@@ -147,9 +147,9 @@ func (c *Command) Cleanup() error {
 	}
 
 	if c.tmpfile != "" {
-		if Verbose {
-			log.Infof("remove tmpfile of command: %s", c.Cmd)
-		}
+		// if Verbose {
+		// 	log.Infof("remove tmpfile of command: %s", c.Cmd)
+		// }
 		err = os.Remove(c.tmpfile)
 	}
 	return err
@@ -157,6 +157,7 @@ func (c *Command) Cleanup() error {
 
 // run a command and save output to c.reader.
 // Note that output returns only after finishing run.
+// This function is mainly borrowed from https://github.com/brentp/gargs .
 func (c *Command) run() error {
 	t := time.Now()
 	defer func() {
@@ -165,7 +166,7 @@ func (c *Command) run() error {
 	var command *exec.Cmd
 	qcmd := fmt.Sprintf(`%s`, c.Cmd)
 	if Verbose {
-		log.Infof("run command: %s", qcmd)
+		log.Infof("start  cmd #%d: %s", c.ID, qcmd)
 	}
 
 	if c.Timeout > 0 {
@@ -209,9 +210,9 @@ func (c *Command) run() error {
 		return errors.Wrapf(err, "run command: %s", c.Cmd)
 	}
 
-	if Verbose {
-		log.Infof("create tmpfile for command: %s", c.Cmd)
-	}
+	// if Verbose {
+	// 	log.Infof("create tmpfile for command: %s", c.Cmd)
+	// }
 
 	c.tmpfh, err = ioutil.TempFile("", tmpfilePrefix)
 	if err != nil {
@@ -283,9 +284,9 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 					// output the command name
 					if opts.DryRun {
 						chOut <- c.Cmd + "\n"
-						if Verbose {
-							log.Infof("finished sending cmd name: %s", c.Cmd)
-						}
+						// if Verbose {
+						// 	log.Infof("finish sending cmd name: %s", c.Cmd)
+						// }
 						return
 					}
 
@@ -307,9 +308,9 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 						}
 					}
 
-					if Verbose {
-						log.Infof("finished receiving data from: %s", c.Cmd)
-					}
+					// if Verbose {
+					// 	log.Infof("finish receiving data from: %s", c.Cmd)
+					// }
 				}(c)
 			}
 
@@ -382,9 +383,9 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 		wg.Wait()
 		close(chOut)
 
-		if Verbose {
-			log.Infof("finished sending all output")
-		}
+		// if Verbose {
+		// 	log.Infof("finish sending all output")
+		// }
 		done <- 1
 	}()
 	return chOut, done
@@ -454,7 +455,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		wg.Wait()
 		close(chCmd)
 		if Verbose {
-			log.Infof("finished running all %d commands", id-1)
+			log.Infof("finish running all %d commands", id-1)
 		}
 		done <- 1
 	}()

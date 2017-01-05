@@ -1,19 +1,15 @@
 # rush
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/shenwei356/rush)](https://goreportcard.com/report/github.com/shenwei356/rush)
+[![Latest Version](https://img.shields.io/github/release/shenwei356/rush.svg?style=flat?maxAge=86400)](https://github.com/shenwei356/rush/releases)
+[![Github Releases](https://img.shields.io/github/downloads/shenwei356/rush/latest/total.svg?maxAge=3600)](http://bioinf.shenwei.me/rush/download/)
+
 `rush` -- parallelly execute shell commands.
 
 `rush` is a tool similar to [GNU parallel](https://www.gnu.org/software/parallel/)
  and [gargs](https://github.com/brentp/gargs).
  `rush` borrows some idea from them and has some unique features,
   e.g., more advanced embeded strings replacement than `parallel`.
-
-**Source code:** [https://github.com/shenwei356/rush](https://github.com/shenwei356/rush)
-[![GitHub stars](https://img.shields.io/github/stars/shenwei356/rush.svg?style=social&label=Star&?maxAge=2592000)](https://github.com/shenwei356/rush)
-[![license](https://img.shields.io/github/license/shenwei356/rush.svg?maxAge=2592000)](https://github.com/shenwei356/rush/blob/master/LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/shenwei356/rush)](https://goreportcard.com/report/github.com/shenwei356/rush)
-
-**Latest version:** [![Latest Version](https://img.shields.io/github/release/shenwei356/rush.svg?style=flat?maxAge=86400)](https://github.com/shenwei356/rush/releases)
-[![Github Releases](https://img.shields.io/github/downloads/shenwei356/rush/latest/total.svg?maxAge=3600)](http://bioinf.shenwei.me/rush/download/)
 
 ## Features
 
@@ -29,7 +25,7 @@ Major:
   save status after [capturing ctrl+c](https://nathanleclaire.com/blog/2014/08/24/handling-ctrl-c-interrupt-signal-in-golang-programs/)
 - [x] support positional replacement strings: `{n}`
     - [x] columns in delimiter-delimited data
-    - [x] matches of regular expression
+    - [ ] matches of regular expression
 - [x] GNU parallel like replacement strings:
     - [x] `{#}`, job number
     - [x] `{}`, full line
@@ -38,7 +34,7 @@ Major:
     - [x] `{/}`, dirname  (`{//}` in GNU parallel)
     - [x] `{%}`, basename (`{/}` in GNU parallel)
     - [x] possible combinations:
-        - [x] `{%.}`, `{%,}`
+        - [x] `{%.}`, `{%:}`
         - [x] `{n.}`, `{n/}` ...
 - [x] `awk -v` like defined variables
 - [ ] appropriate quoting
@@ -70,7 +66,57 @@ Minor:
 
 ## Performance
 
-See on [release page](https://github.com/shenwei356/rush/releases)
+See on [release page](https://github.com/shenwei356/rush/releases).
+
+## Usage & Examples
+
+```
+rush -- parallelly execute shell commands
+
+Version: 0.0.2
+
+Author: Wei Shen <shenwei356@gmail.com>
+
+Source code: https://github.com/shenwei356/rush
+
+Usage:
+  rush [flags] [command] [args of command...]
+
+Examples:
+  1. simple run  : seq 1 10 | rush echo {}  # quoting is not necessary
+  2. keep order  : seq 1 10 | rush 'echo {}' -k
+  3. with timeout: seq 1 | rush 'sleep 2; echo {}' -t 1
+  4. retry       : seq 1 | rush 'python script.py' -r 3
+  5. basename    : echo dir/file.txt.gz | rush 'echo {%}'　　# file.txt.gz
+  6. dirname     : echo dir/file.txt.gz | rush 'echo {/}'    # dir
+  7. basename without last extension
+                 : echo dir/file.txt.gz | rush 'echo {%.}'   # file.txt
+  8. basename without last extension
+                 : echo dir/file.txt.gz | rush 'echo {%:}'   # file
+  9. job ID, combine fields and other replacement string
+                 : echo 123 file.txt | rush 'echo job {#}: {2} {2.} {1}'
+                 # job 1: file.txt file 123
+
+Flags:
+  -v, --assign stringSlice        assign the value val to the variable var (format: var=val)
+      --dry-run                   print command but not run
+  -d, --field-delimiter string    field delimiter in records (default "\s+")
+  -i, --infile stringSlice        input data file
+  -j, --jobs int                  run n jobs in parallel (default 4)
+  -k, --keep-order                keep output in order of input
+  -n, --nrecords int              number of records sent to a command (default 1)
+  -o, --out-file string           out file ("-" for stdout) (default "-")
+  -D, --record-delimiter string   record delimiter (default is "\n") (default "
+")
+  -r, --retries int               maximum retries
+      --retry-interval int        retry interval (unit: second)
+  -e, --stop-on-error             stop all processes on first error
+  -t, --timeout int               timeout of a command (unit: second, 0 for no timeout)
+      --trim string               trim white space in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)
+      --verbose                   print verbose information
+  -V, --version                   print version information and check for update
+
+```
 
 ## Acknowledgements
 

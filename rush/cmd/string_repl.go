@@ -36,7 +36,7 @@ var reCharsCheck = regexp.MustCompile(`^(\d+)*[^\d]*$`)
 func fillCommand(config Config, command string, chunk Chunk) string {
 	founds := rePlaceHolder.FindAllStringSubmatchIndex(command, -1)
 	if len(founds) == 0 {
-		return command + "\n"
+		return command
 	}
 	fieldsStr := strings.Join(chunk.Data, config.RecordDelimiter)
 	switch config.Trim {

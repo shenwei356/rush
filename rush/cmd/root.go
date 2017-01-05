@@ -45,7 +45,6 @@ Version: %s
 
 Author: Wei Shen <shenwei356@gmail.com>
 
-Documents  : http://bioinf.shenwei.me/rush
 Source code: https://github.com/shenwei356/rush
 
 `, VERSION),
@@ -75,7 +74,7 @@ Source code: https://github.com/shenwei356/rush
 		// -----------------------------------------------------------------
 
 		cancel := make(chan struct{})
-		TmpOutputDataBuffer = config.BufferSize
+		// TmpOutputDataBuffer = config.BufferSize
 		opts := &Options{
 			DryRun:    config.DryRun,
 			Jobs:      config.Jobs,
@@ -168,9 +167,9 @@ Source code: https://github.com/shenwei356/rush
 
 				close(chCmdStr)
 
-				if Verbose {
-					log.Infof("finished reading input data")
-				}
+				// if Verbose {
+				// 	log.Infof("finish reading input data")
+				// }
 				donePreprocess <- 1
 			}()
 
@@ -230,7 +229,7 @@ func init() {
 
 	RootCmd.Flags().StringSliceP("infile", "i", []string{}, "input data file")
 
-	RootCmd.Flags().StringP("record-delimiter", "D", "\n", "record delimiter")
+	RootCmd.Flags().StringP("record-delimiter", "D", "\n", `record delimiter (default is "\n")`)
 	RootCmd.Flags().IntP("nrecords", "n", 1, "number of records sent to a command")
 	RootCmd.Flags().StringP("field-delimiter", "d", `\s+`, "field delimiter in records")
 
@@ -240,13 +239,53 @@ func init() {
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
 	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on first error")
-	RootCmd.Flags().BoolP("continue", "c", false, `continue run commands except for finished commands in "finished.txt"`)
+	// RootCmd.Flags().BoolP("continue", "c", false, `continue run commands except for finished commands in "finished.txt"`)
 	RootCmd.Flags().BoolP("dry-run", "", false, "print command but not run")
 
-	RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of a command before saving to tmpfile (unit: Mb)")
+	// RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of a command before saving to tmpfile (unit: Mb)")
 
-	RootCmd.Flags().StringSliceP("assign", "v", []string{}, "assign the value val to the variable var (format var=val)")
+	RootCmd.Flags().StringSliceP("assign", "v", []string{}, "assign the value val to the variable var (format: var=val)")
 	RootCmd.Flags().StringP("trim", "", "", `trim white space in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)`)
+
+	RootCmd.Example = `  1. simple run  : seq 1 10 | rush echo {}  # quoting is not necessary
+  2. keep order  : seq 1 10 | rush 'echo {}' -k
+  3. with timeout: seq 1 | rush 'sleep 2; echo {}' -t 1
+  4. retry       : seq 1 | rush 'python script.py' -r 3
+  5. basename    : echo dir/file.txt.gz | rush 'echo {%}'　　# file.txt.gz
+  6. dirname     : echo dir/file.txt.gz | rush 'echo {/}'    # dir
+  7. basename without last extension
+                 : echo dir/file.txt.gz | rush 'echo {%.}'   # file.txt
+  8. basename without last extension
+                 : echo dir/file.txt.gz | rush 'echo {%:}'   # file
+  9. job ID, combine fields and other replacement string
+                 : echo 123 file.txt | rush 'echo job {#}: {2} {2.} {1}'
+                 # job 1: file.txt file 123`
+
+	RootCmd.SetUsageTemplate(`Usage:{{if .Runnable}}
+  {{if .HasAvailableFlags}}{{appendIfNotPresent .UseLine "[flags]"}}{{else}}{{.UseLine}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+  {{ .CommandPath}} [command]{{end}} [command] [args of command...]{{if gt .Aliases 0}}
+
+Aliases:
+  {{.NameAndAliases}}
+{{end}}{{if .HasExample}}
+
+Examples:
+{{ .Example }}{{end}}{{ if .HasAvailableSubCommands}}
+
+Available Commands:{{range .Commands}}{{if .IsAvailableCommand}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{ if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimRightSpace}}{{end}}{{ if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimRightSpace}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:{{range .Commands}}{{if .IsHelpCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{ if .HasAvailableSubCommands }}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+`)
 }
 
 // Config is the struct containing all global flags
@@ -273,7 +312,7 @@ type Config struct {
 	Continue  bool
 	DryRun    bool
 
-	BufferSize int
+	// BufferSize int
 
 	AssignMap map[string]string
 	Trim      string
@@ -298,8 +337,16 @@ func getConfigs(cmd *cobra.Command) Config {
 	assignStrs := getFlagStringSlice(cmd, "assign")
 	assignMap := make(map[string]string)
 	for _, s := range assignStrs {
-		found := reAssign.FindStringSubmatch(s)
-		assignMap[found[1]] = found[2]
+		if reAssign.MatchString(s) {
+			found := reAssign.FindStringSubmatch(s)
+			switch found[1] {
+			case ".", ":", "/", "%", "#":
+				checkError(fmt.Errorf(`"var" in --v/--assign var=val should not be ".", ":", "/", "%%" or "#", given: "%s"`, found[1]))
+			}
+			assignMap[found[1]] = found[2]
+		} else {
+			checkError(fmt.Errorf(`illegal value for flag -v/--assign (format: "var=value", e.g., "-v 'a=a bc'"): %s`, s))
+		}
 	}
 
 	return Config{
@@ -324,7 +371,7 @@ func getConfigs(cmd *cobra.Command) Config {
 		Continue:  getFlagBool(cmd, "continue"),
 		DryRun:    getFlagBool(cmd, "dry-run"),
 
-		BufferSize: getFlagPositiveInt(cmd, "buffer-size") * 1048576,
+		// BufferSize: getFlagPositiveInt(cmd, "buffer-size") * 1048576,
 
 		Trim:      trim,
 		AssignMap: assignMap,

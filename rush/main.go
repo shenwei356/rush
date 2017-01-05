@@ -20,18 +20,13 @@
 
 package main
 
-import (
-	"os"
-	"runtime/pprof"
-
-	"github.com/shenwei356/rush/rush/cmd"
-)
+import "github.com/shenwei356/rush/rush/cmd"
 
 func main() {
 	// go tool pprof ./rush pprof
-	f, _ := os.Create("pprof")
-	pprof.StartCPUProfile(f)
-	defer pprof.StopCPUProfile()
+	// f, _ := os.Create("pprof")
+	// pprof.StartCPUProfile(f)
+	// defer pprof.StopCPUProfile()
 
 	cmd.Execute()
 
