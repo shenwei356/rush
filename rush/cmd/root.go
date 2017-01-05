@@ -58,7 +58,7 @@ Source code: https://github.com/shenwei356/rush
 			return
 		}
 
-		j := config.Ncpus + 1
+		j := config.Jobs + 1
 		if j > runtime.NumCPU() {
 			j = runtime.NumCPU()
 		}
@@ -72,14 +72,17 @@ Source code: https://github.com/shenwei356/rush
 			command0 = "echo {}"
 		}
 
+		// -----------------------------------------------------------------
+
 		cancel := make(chan struct{})
-		DataBuffer = config.BufferSize
+		TmpOutputDataBuffer = config.BufferSize
 		opts := &Options{
 			DryRun:    config.DryRun,
-			Workers:   config.Ncpus,
+			Jobs:      config.Jobs,
 			KeepOrder: config.KeepOrder,
 			Retries:   config.Retries,
 			Timeout:   time.Duration(config.Timeout) * time.Second,
+			StopOnErr: config.StopOnErr,
 			Verbose:   config.Verbose,
 		}
 
@@ -131,7 +134,7 @@ Source code: https://github.com/shenwei356/rush
 			// ---------------------------------------------------------------
 
 			// channel of command
-			chCmdStr := make(chan string, config.Ncpus)
+			chCmdStr := make(chan string, config.Jobs)
 
 			// ---------------------------------------------------------------
 
@@ -219,10 +222,10 @@ func Execute() {
 }
 
 func init() {
-	RootCmd.Flags().BoolP("verbose", "v", false, "print verbose information")
+	RootCmd.Flags().BoolP("verbose", "", false, "print verbose information")
 	RootCmd.Flags().BoolP("version", "V", false, `print version information and check for update`)
 
-	RootCmd.Flags().IntP("ncpus", "j", runtime.NumCPU(), "run n jobs in parallel")
+	RootCmd.Flags().IntP("jobs", "j", runtime.NumCPU(), "run n jobs in parallel")
 	RootCmd.Flags().StringP("out-file", "o", "-", `out file ("-" for stdout)`)
 
 	RootCmd.Flags().StringSliceP("infile", "i", []string{}, "input data file")
@@ -236,11 +239,14 @@ func init() {
 	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: second, 0 for no timeout)")
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
-	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on any error")
+	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on first error")
 	RootCmd.Flags().BoolP("continue", "c", false, `continue run commands except for finished commands in "finished.txt"`)
 	RootCmd.Flags().BoolP("dry-run", "", false, "print command but not run")
 
-	RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of command before saving to tmpfile (unit: Mb)")
+	RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of a command before saving to tmpfile (unit: Mb)")
+
+	RootCmd.Flags().StringSliceP("assign", "v", []string{}, "assign the value val to the variable var (format var=val)")
+	RootCmd.Flags().StringP("trim", "", "", `trim white space in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)`)
 }
 
 // Config is the struct containing all global flags
@@ -248,7 +254,7 @@ type Config struct {
 	Verbose bool
 	Version bool
 
-	Ncpus   int
+	Jobs    int
 	OutFile string
 
 	Infiles []string
@@ -268,14 +274,39 @@ type Config struct {
 	DryRun    bool
 
 	BufferSize int
+
+	AssignMap map[string]string
+	Trim      string
 }
 
+// var=value
+var reAssign = regexp.MustCompile(`\s*([^=]+)\s*=(.+)`)
+
 func getConfigs(cmd *cobra.Command) Config {
+	trim := getFlagString(cmd, "trim")
+	if trim != "" {
+		trim = strings.ToLower(trim)
+		switch trim {
+		case "l":
+		case "r":
+		case "lr", "rl", "b":
+		default:
+			checkError(fmt.Errorf(`illegal value for flag --trim: %s. (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)`, trim))
+		}
+	}
+
+	assignStrs := getFlagStringSlice(cmd, "assign")
+	assignMap := make(map[string]string)
+	for _, s := range assignStrs {
+		found := reAssign.FindStringSubmatch(s)
+		assignMap[found[1]] = found[2]
+	}
+
 	return Config{
 		Verbose: getFlagBool(cmd, "verbose"),
 		Version: getFlagBool(cmd, "version"),
 
-		Ncpus:   getFlagPositiveInt(cmd, "ncpus"),
+		Jobs:    getFlagPositiveInt(cmd, "jobs"),
 		OutFile: getFlagString(cmd, "out-file"),
 
 		Infiles: getFlagStringSlice(cmd, "infile"),
@@ -294,5 +325,8 @@ func getConfigs(cmd *cobra.Command) Config {
 		DryRun:    getFlagBool(cmd, "dry-run"),
 
 		BufferSize: getFlagPositiveInt(cmd, "buffer-size") * 1048576,
+
+		Trim:      trim,
+		AssignMap: assignMap,
 	}
 }

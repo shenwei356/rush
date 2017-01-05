@@ -6,7 +6,6 @@ import os
 
 
 def timeit(cmd):
-    sys.stderr.write('{}\n'.format(cmd))
     t = time.time()
     os.system(cmd)
     return time.time() - t
@@ -35,12 +34,15 @@ for test in tests:
         n = int((70 - len(msg)) / 2)
         sys.stderr.write('{}[ {} ]{}\n'.format('-' * n,  msg, '-' * n))
 
+        sys.stderr.write('\ncommands:\n')
         times = dict()
         for app, args in apps.items():
             cmd = '{} | {} {} {} {} "{}" > t.{}'.format(
                 test[1], app, args['jobs'], njobs,
                 args['keep-order'] if keep_order else '',
                 test[2], os.path.basename(app))
+
+            sys.stderr.write('{}\n'.format(cmd))
 
             times[app] = timeit(cmd)
 
@@ -54,3 +56,4 @@ for test in tests:
             os.remove('t.{}'.format(os.path.basename(app)))
 
         sys.stderr.write('\n')
+    sys.stderr.write('\n')

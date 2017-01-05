@@ -33,14 +33,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/cznic/sortutil"
 	"github.com/pkg/errors"
 )
 
-// Command is
+// Command is the Command struct
 type Command struct {
 	ID  uint64
 	Cmd string
@@ -72,16 +71,17 @@ func NewCommand(id uint64, cmdStr string, cancel chan struct{}, timeout time.Dur
 	return command
 }
 
-// Verbose prints extra information
+// Verbose decide whether print extra information
 var Verbose bool
 
 var tmpfilePrefix = fmt.Sprintf("rush.%d.", os.Getpid())
 
-// DataBuffer is buffer size for output of command before saving to tmpfile
-var DataBuffer = 1048576
+// TmpOutputDataBuffer is buffer size for output of a command before saving to tmpfile,
+// default 1M.
+var TmpOutputDataBuffer = 1048576 // 1M
 
-// OutputBufferSize is
-var OutputBufferSize = 16384 // 16K
+// OutputChunkSize is buffer size of output string chunk sent to channel, default 16K.
+var OutputChunkSize = 16384 // 16K
 
 // Run starts to run
 func (c *Command) Run() error {
@@ -92,17 +92,21 @@ func (c *Command) Run() error {
 		return c.Err
 	}
 
+	if Verbose {
+		log.Infof("finished command in %s: %s", c.Duration, c.Cmd)
+	}
+
 	go func() {
 		if c.tmpfile != "" { // data saved in tempfile
 			c.reader = bufio.NewReader(c.tmpfh)
 		}
 
-		buf := make([]byte, OutputBufferSize)
+		buf := make([]byte, OutputChunkSize)
 		var n int
 		for {
 			n, c.Err = c.reader.Read(buf)
 			if c.Err != nil {
-				if c.Err == io.EOF || n < OutputBufferSize {
+				if c.Err == io.EOF || n < OutputChunkSize {
 					c.Ch <- string(buf[0:n])
 					c.Err = nil
 				}
@@ -129,7 +133,7 @@ func getShell() string {
 	return shell
 }
 
-// Cleanup remove tmpfile
+// Cleanup removes tmpfile
 func (c *Command) Cleanup() error {
 	var err error
 	if c.tmpfh != nil {
@@ -151,21 +155,13 @@ func (c *Command) Cleanup() error {
 	return err
 }
 
-// ExitCode returns exit code
-func (c *Command) ExitCode() int {
-	if c.Err == nil {
-		return 0
-	}
-	if ex, ok := c.Err.(*exec.ExitError); ok {
-		if st, ok := ex.Sys().(syscall.WaitStatus); ok {
-			return st.ExitStatus()
-		}
-	}
-	return -1
-}
-
-// run a command, note that output returns only after finishing run.
+// run a command and save output to c.reader.
+// Note that output returns only after finishing run.
 func (c *Command) run() error {
+	t := time.Now()
+	defer func() {
+		c.Duration = time.Now().Sub(t)
+	}()
 	var command *exec.Cmd
 	qcmd := fmt.Sprintf(`%s`, c.Cmd)
 	if Verbose {
@@ -175,6 +171,7 @@ func (c *Command) run() error {
 	if c.Timeout > 0 {
 		c.ctx, c.ctxCancel = context.WithTimeout(context.Background(), c.Timeout)
 		command = exec.CommandContext(c.ctx, getShell(), "-c", qcmd)
+		defer c.ctxCancel()
 	} else {
 		command = exec.Command(getShell(), "-c", qcmd)
 	}
@@ -192,12 +189,12 @@ func (c *Command) run() error {
 		checkError(errors.Wrapf(err, "start command: %s", c.Cmd))
 	}
 
-	bpipe := bufio.NewReaderSize(pipeStdout, DataBuffer)
+	bpipe := bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
 
 	var readed []byte
-	readed, err = bpipe.Peek(DataBuffer)
+	readed, err = bpipe.Peek(TmpOutputDataBuffer)
 
-	// less than DataBuffer bytes in output...
+	// less than TmpOutputDataBuffer bytes in output...
 	if err == bufio.ErrBufferFull || err == io.EOF {
 		err = command.Wait()
 		if err != nil {
@@ -207,13 +204,13 @@ func (c *Command) run() error {
 		return nil
 	}
 
-	if Verbose {
-		log.Infof("create tmpfile for command: %s", c.Cmd)
-	}
-
-	// more than DataBuffer bytes in output. must use tmpfile
+	// more than TmpOutputDataBuffer bytes in output. must use tmpfile
 	if err != nil {
 		return errors.Wrapf(err, "run command: %s", c.Cmd)
+	}
+
+	if Verbose {
+		log.Infof("create tmpfile for command: %s", c.Cmd)
 	}
 
 	c.tmpfh, err = ioutil.TempFile("", tmpfilePrefix)
@@ -242,36 +239,35 @@ func (c *Command) run() error {
 		return errors.Wrapf(err, "wait command: %s", c.Cmd)
 	}
 
-	if Verbose {
-		log.Infof("finished command: %s", c.Cmd)
-	}
-
 	return nil
 }
 
-// Options is
+// Options contains the options
 type Options struct {
-	DryRun    bool
-	Workers   int
-	KeepOrder bool
-	Retries   int
-	Timeout   time.Duration
+	DryRun    bool          // just print command
+	Jobs      int           // max jobs number
+	KeepOrder bool          // keep output order
+	Retries   int           // max retry chances
+	Timeout   time.Duration // timeout
+	StopOnErr bool          // stop on any error
 	Verbose   bool
 }
 
-// Run4Output is
+// Run4Output runs commands in parallel from channel chCmdStr,
+// and returns an output text channel,
+// and a done channel to ensure safe exit.
 func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan string, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
 	chCmd, doneChCmd := Run(opts, cancel, chCmdStr)
-	chOut := make(chan string, opts.Workers)
+	chOut := make(chan string, opts.Jobs)
 	done := make(chan int)
 
 	go func() {
 		var wg sync.WaitGroup
 		if !opts.KeepOrder { // do not keep order
-			tokens := make(chan int, opts.Workers)
+			tokens := make(chan int, opts.Jobs)
 			var line string
 
 			for c := range chCmd {
@@ -312,7 +308,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 					}
 
 					if Verbose {
-						log.Infof("finished reseiving data from: %s", c.Cmd)
+						log.Infof("finished receiving data from: %s", c.Cmd)
 					}
 				}(c)
 			}
@@ -394,18 +390,20 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 	return chOut, done
 }
 
-// Run is
+// Run runs commands in parallel from channel chCmdStr，
+// and returns a Command channel,
+// and a done channel to ensure safe exit.
 func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Command, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
 
-	chCmd := make(chan *Command, opts.Workers)
+	chCmd := make(chan *Command, opts.Jobs)
 	done := make(chan int)
 
 	go func() {
 		var wg sync.WaitGroup
-		tokens := make(chan int, opts.Workers)
+		tokens := make(chan int, opts.Jobs)
 		var id uint64 = 1
 		for cmdStr := range chCmdStr {
 			wg.Add(1)
@@ -418,12 +416,37 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 				}()
 
 				command := NewCommand(id, cmdStr, cancel, opts.Timeout)
-				err := command.Run()
-				if err != nil { // fail to run
-					return
+
+				chances := opts.Retries
+				for {
+					err := command.Run()
+					if err != nil { // fail to run
+						if chances == 0 {
+							log.Error(err)
+						} else {
+							log.Warning(err)
+						}
+
+						if opts.StopOnErr {
+							close(cancel)
+							log.Error("stop on first error")
+							os.Exit(1)
+						}
+						if chances > 0 {
+							if Verbose && opts.Retries > 0 {
+								log.Warningf("retry %d/%d times: %s",
+									opts.Retries-chances+1,
+									opts.Retries, command.Cmd)
+							}
+							chances--
+							continue
+						}
+						return
+					}
+					chCmd <- command
+					break
 				}
 
-				chCmd <- command
 			}(id, cmdStr)
 			id++
 		}

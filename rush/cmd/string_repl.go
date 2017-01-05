@@ -39,6 +39,15 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 		return command + "\n"
 	}
 	fieldsStr := strings.Join(chunk.Data, config.RecordDelimiter)
+	switch config.Trim {
+	case "l":
+		fieldsStr = strings.TrimLeft(fieldsStr, " \t")
+	case "r":
+		fieldsStr = strings.TrimRight(fieldsStr, " \t")
+	case "lr", "rl", "b":
+		fieldsStr = strings.Trim(fieldsStr, " \t")
+	}
+
 	var fields []string
 	if config.RecordDelimiter == config.FieldDelimiter {
 		fields = chunk.Data
@@ -59,43 +68,50 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 			if !reCharsCheck.MatchString(chars) {
 				checkError(fmt.Errorf("illegal placeholder: {%s}", chars))
 			}
-			charsGroups = reChars.FindAllString(chars, -1)
 
-			char = charsGroups[0]
-			if char[0] >= 48 && char[0] <= 57 { // digits, handle specific field
-				i, _ = strconv.Atoi(char)
-				if i == 0 {
+			if v, ok := config.AssignMap[chars]; ok { // key-value
+				target = v
+			} else {
+				charsGroups = reChars.FindAllString(chars, -1)
+
+				char = charsGroups[0]
+				if char[0] >= 48 && char[0] <= 57 { // digits, handle specific field
+					i, _ = strconv.Atoi(char)
+					if i == 0 {
+						target = fieldsStr
+					} else {
+						if i > len(fields) {
+							i = len(fields)
+						}
+						target = fields[i-1]
+					}
+					i = 1
+				} else { // handle whole fieldStr
 					target = fieldsStr
-				} else {
-					if i > len(fields) {
-						i = len(fields)
-					}
-					target = fields[i-1]
+					i = 0
 				}
-				i = 1
-			} else { // handle whole fieldStr
-				target = fieldsStr
-				i = 0
-			}
 
-			for _, char = range charsGroups[i:] {
-				switch char {
-				case "#": // job number
-					target = fmt.Sprintf("%d", chunk.ID)
-				case ".": // remove last extension
-					i = strings.LastIndex(target, ".")
-					if i > 0 {
-						target = target[0:i]
+				for _, char = range charsGroups[i:] {
+					switch char {
+					case "#": // job number
+						target = fmt.Sprintf("%d", chunk.ID)
+					case ".": // remove last extension
+						i = strings.LastIndex(target, ".")
+						if i > 0 {
+							target = target[0:i]
+						}
+					case ":": //remove any extension
+						i = strings.Index(target, ".")
+						if i > 0 {
+							target = target[0:i]
+						}
+					case "/": //dirname
+						target = filepath.Dir(target)
+					case "%":
+						target = filepath.Base(target)
+					default:
+						target = ""
 					}
-				case ":": //remove any extension
-					i = strings.Index(target, ".")
-					if i > 0 {
-						target = target[0:i]
-					}
-				case "/": //dirname
-					target = filepath.Dir(target)
-				case "%":
-					target = filepath.Base(target)
 				}
 			}
 		}
