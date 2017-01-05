@@ -27,12 +27,9 @@ import (
 	"os"
 	"regexp"
 	"runtime"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/cznic/sortutil"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -67,16 +64,23 @@ Source code: https://github.com/shenwei356/rush
 		}
 		runtime.GOMAXPROCS(j)
 
-		DataBuffer = config.BufferSize
-		ChanBuffer = config.Ncpus
-		Verbose = config.Verbose
-
 		config.reFieldDelimiter, err = regexp.Compile(config.FieldDelimiter)
 		checkError(errors.Wrap(err, "compile field delimiter"))
 
 		command0 := strings.Join(args, " ")
 		if command0 == "" {
 			command0 = "echo {}"
+		}
+
+		cancel := make(chan struct{})
+		DataBuffer = config.BufferSize
+		opts := &Options{
+			DryRun:    config.DryRun,
+			Workers:   config.Ncpus,
+			KeepOrder: config.KeepOrder,
+			Retries:   config.Retries,
+			Timeout:   time.Duration(config.Timeout) * time.Second,
+			Verbose:   config.Verbose,
 		}
 
 		// out file handler
@@ -97,6 +101,7 @@ Source code: https://github.com/shenwei356/rush
 			config.Infiles = append(config.Infiles, "-")
 		}
 
+		// split function for scanner
 		split := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 			if atEOF && len(data) == 0 {
 				return 0, nil, nil
@@ -123,147 +128,16 @@ Source code: https://github.com/shenwei356/rush
 				defer infh.Close()
 			}
 
-			// channel of input data
-			chIn := make(chan Chunk, config.Ncpus)
+			// ---------------------------------------------------------------
+
+			// channel of command
+			chCmdStr := make(chan string, config.Ncpus)
 
 			// ---------------------------------------------------------------
-			// output
-			// channel of Command
-			chCmd := make(chan *Command, config.Ncpus)
-			chOut := make(chan string, config.Ncpus)
 
-			var wgOut sync.WaitGroup
-			cancelOut := make(chan struct{})
-			doneOut := make(chan int)
-
-			doneWholeOut := make(chan int)
+			// read data and generate command
+			donePreprocess := make(chan int)
 			go func() {
-				// read from chOut and print
-				go func() {
-					last := time.Now().Add(2 * time.Second)
-					for c := range chOut {
-						outfh.WriteString(c)
-
-						if t := time.Now(); t.After(last) {
-							outfh.Flush()
-							last = t.Add(2 * time.Second)
-						}
-					}
-					outfh.Flush()
-
-					doneOut <- 1
-				}()
-
-				if !config.KeepOrder { // do not keep order
-					// fan in
-					tokensHandleCmdOut := make(chan int, config.Ncpus)
-					var line string
-					for c := range chCmd {
-						wgOut.Add(1)
-						tokensHandleCmdOut <- 1
-						go func(cancel chan struct{}, c *Command) {
-							defer func() {
-								wgOut.Done()
-								<-tokensHandleCmdOut
-							}()
-
-							// output the command name
-							if config.DryRun {
-								chOut <- c.Cmd + "\n"
-								return
-							}
-
-							// read data from channel and outpput
-						LOOP:
-							for {
-								select {
-								case chOut <- <-c.Ch:
-								case <-cancel:
-									break LOOP
-								}
-								if c.Done {
-									// do not forget left data
-									for line = range c.Ch {
-										chOut <- line
-									}
-									checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
-									break LOOP
-								}
-							}
-						}(cancelOut, c)
-					}
-				} else {
-					wgOut.Add(1)
-
-					var id uint64 = 1
-					var c, c1 *Command
-					var ok bool
-					var line string
-					cmds := make(map[uint64]*Command)
-					for c = range chCmd {
-						if c.ID == id { // your turn
-							if config.DryRun {
-								chOut <- c.Cmd + "\n"
-							} else {
-								for line = range c.Ch {
-									chOut <- line
-								}
-								checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
-							}
-
-							id++
-						} else { // wait the ID come out
-							for true {
-								if c1, ok = cmds[id]; ok {
-									if config.DryRun {
-										chOut <- c1.Cmd + "\n"
-									} else {
-										for line = range c1.Ch {
-											chOut <- line
-										}
-										checkError(errors.Wrapf(c1.Cleanup(), "remove tmpfile for cmd: %s", c1.Cmd))
-									}
-
-									delete(cmds, c1.ID)
-									id++
-								} else {
-									break
-								}
-							}
-							cmds[c.ID] = c
-						}
-					}
-					if len(cmds) > 0 {
-						ids := make(sortutil.Uint64Slice, len(cmds))
-						i := 0
-						for id = range cmds {
-							ids[i] = id
-							i++
-						}
-						sort.Sort(ids)
-						for _, id = range ids {
-							c := cmds[id]
-							if config.DryRun {
-								chOut <- c.Cmd + "\n"
-							} else {
-								for line = range c.Ch {
-									chOut <- line
-								}
-								checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
-							}
-						}
-					}
-
-					wgOut.Done()
-				}
-
-				doneWholeOut <- 1
-			}()
-
-			// ---------------------------------------------------------------
-			// producer
-			go func() {
-				defer close(chIn)
 				scanner := bufio.NewScanner(infh)
 				scanner.Buffer(make([]byte, 0, 16384), 2147483648)
 				scanner.Split(split)
@@ -277,55 +151,54 @@ Source code: https://github.com/shenwei356/rush
 					records = append(records, scanner.Text())
 
 					if len(records) == n {
-						chIn <- Chunk{ID: id, Data: records}
+						chCmdStr <- fillCommand(config, command0, Chunk{ID: id, Data: records})
 						id++
 						records = make([]string, 0, n)
 					}
 				}
 				if len(records) > 0 {
-					chIn <- Chunk{ID: id, Data: records}
+					chCmdStr <- fillCommand(config, command0, Chunk{ID: id, Data: records})
 					id++
 				}
 
 				checkError(errors.Wrap(scanner.Err(), "read input data"))
+
+				close(chCmdStr)
+
+				if Verbose {
+					log.Infof("finished reading input data")
+				}
+				donePreprocess <- 1
 			}()
 
 			// ---------------------------------------------------------------
-			// consumer
-			var wgWorkers sync.WaitGroup
-			tokensWorker := make(chan int, config.Ncpus)
-			for c := range chIn {
-				wgWorkers.Add(1)
-				go func(c Chunk) {
-					defer func() {
-						wgWorkers.Done()
-					}()
 
-					command := NewCommand(c.ID,
-						fillCommand(config, command0, c),
-						time.Duration(config.Timeout)*time.Second)
+			// output
+			chOutput, doneSendOutput := Run4Output(opts, cancel, chCmdStr)
 
-					// dry run
-					if config.DryRun {
-						chCmd <- command
-						return
+			// read from chOutput and print
+			doneOutput := make(chan int)
+			go func() {
+				last := time.Now().Add(2 * time.Second)
+				for c := range chOutput {
+					outfh.WriteString(c)
+
+					if t := time.Now(); t.After(last) {
+						outfh.Flush()
+						last = t.Add(2 * time.Second)
 					}
+				}
+				outfh.Flush()
 
-					err = command.Run(tokensWorker)
-					checkError(err)
-					chCmd <- command
-				}(c)
-			}
+				doneOutput <- 1
+			}()
+
+			// ---------------------------------------------------------------
 
 			// the order is very important!
-			wgWorkers.Wait() // wait workers done
-
-			close(chCmd) // close Cmd channel
-			wgOut.Wait() //
-			close(chOut) // close output chanel
-
-			<-doneOut      // finish output
-			<-doneWholeOut // wait output done
+			<-donePreprocess // finish read data and send command
+			<-doneSendOutput // finish send output
+			<-doneOutput     // finish print output
 		}
 	},
 }
@@ -334,12 +207,6 @@ Source code: https://github.com/shenwei356/rush
 type Chunk struct {
 	ID   uint64
 	Data []string
-}
-
-// ChunkCommand is
-type ChunkCommand struct {
-	ID  uint64
-	Cmd *Command
 }
 
 // Execute adds all child commands to the root command sets flags appropriately.
