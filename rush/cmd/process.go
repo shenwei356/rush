@@ -90,18 +90,20 @@ func (c *Command) Run() error {
 			c.reader = bufio.NewReader(c.tmpfh)
 		}
 
-		var line string
+		bufsize := 16384 // 16K
+		buf := make([]byte, bufsize)
+		var n int
 		for {
-			line, c.Err = c.reader.ReadString('\n')
-			// fmt.Printf("read data from: %s: %s, %s\n", c.Cmd, line, c.Err)
+			n, c.Err = c.reader.Read(buf)
+			// fmt.Printf("read data from: %s: %d, %s\n", c.Cmd, n, c.Err)
 			if c.Err != nil {
-				if c.Err == io.EOF {
-					c.Ch <- line
+				if c.Err == io.EOF || n < bufsize {
+					c.Ch <- string(buf[0:n])
 					c.Err = nil
 				}
 				break
 			}
-			c.Ch <- line
+			c.Ch <- string(buf[0:n])
 		}
 		// fmt.Printf("finished read data from: %s\n", c.Cmd)
 		close(c.Ch)

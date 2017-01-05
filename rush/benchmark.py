@@ -50,5 +50,5 @@ for test in tests:
 
         sys.stderr.write('\nmd5sum:\n')
         for app in sorted(times.keys()):
-            os.system('md5sum t.{}', os.path.basename(app))
-            os.remove('t.{}', os.path.basename(app))
+            os.system('md5sum t.{}'.format(os.path.basename(app)))
+            os.remove('t.{}'.format(os.path.basename(app)))
