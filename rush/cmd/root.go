@@ -142,7 +142,7 @@ Source code: https://github.com/shenwei356/rush
 			donePreprocess := make(chan int)
 			go func() {
 				scanner := bufio.NewScanner(infh)
-				scanner.Buffer(make([]byte, 0, 16384), 2147483648)
+				scanner.Buffer(make([]byte, 0, 16384), 2147483647)
 				scanner.Split(split)
 
 				n := config.NRecords
