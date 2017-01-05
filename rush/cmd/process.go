@@ -75,10 +75,14 @@ var DataBuffer = 1048576
 var ChanBuffer = runtime.NumCPU()
 
 // Run starts to run
-func (c *Command) Run() error {
+func (c *Command) Run(tokens chan int) error {
 	c.Ch = make(chan string, ChanBuffer*runtime.NumCPU())
+	tokens <- 1
 	// start command
 	go func() {
+		defer func() {
+			<-tokens
+		}()
 		c.Err = c.run()
 		if c.Err != nil {
 			return
@@ -95,7 +99,7 @@ func (c *Command) Run() error {
 		var n int
 		for {
 			n, c.Err = c.reader.Read(buf)
-			// fmt.Printf("read data from: %s: %d, %s\n", c.Cmd, n, c.Err)
+			// fmt.Printf("read data from: %s: read %d bytes, err: %s\n", c.Cmd, n, c.Err)
 			if c.Err != nil {
 				if c.Err == io.EOF || n < bufsize {
 					c.Ch <- string(buf[0:n])
@@ -105,7 +109,11 @@ func (c *Command) Run() error {
 			}
 			c.Ch <- string(buf[0:n])
 		}
-		// fmt.Printf("finished read data from: %s\n", c.Cmd)
+
+		if Verbose {
+			log.Infof("finished read data from: %s\n", c.Cmd)
+		}
+
 		close(c.Ch)
 		c.Done = true
 	}()
@@ -233,7 +241,7 @@ func (c *Command) run() error {
 	}
 
 	if Verbose {
-		log.Infof("finished: %s\n", c.Cmd)
+		log.Infof("finished command: %s\n", c.Cmd)
 	}
 
 	return nil

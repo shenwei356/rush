@@ -156,15 +156,15 @@ Source code: https://github.com/shenwei356/rush
 
 				if !config.KeepOrder { // do not keep order
 					// fan in
-					tokens := make(chan int, config.Ncpus)
+					tokensHandleCmdOut := make(chan int, config.Ncpus)
 					var line string
 					for c := range chCmd {
 						wgOut.Add(1)
-						tokens <- 1
+						tokensHandleCmdOut <- 1
 						go func(cancel chan struct{}, c *Command) {
 							defer func() {
 								wgOut.Done()
-								<-tokens
+								<-tokensHandleCmdOut
 							}()
 
 							// output the command name
@@ -293,14 +293,12 @@ Source code: https://github.com/shenwei356/rush
 			// ---------------------------------------------------------------
 			// consumer
 			var wgWorkers sync.WaitGroup
-			tokens := make(chan int, config.Ncpus)
+			tokensWorker := make(chan int, config.Ncpus)
 			for c := range chIn {
 				wgWorkers.Add(1)
-				tokens <- 1
 				go func(c Chunk) {
 					defer func() {
 						wgWorkers.Done()
-						<-tokens
 					}()
 
 					command := NewCommand(c.ID,
@@ -313,7 +311,7 @@ Source code: https://github.com/shenwei356/rush
 						return
 					}
 
-					err = command.Run()
+					err = command.Run(tokensWorker)
 					checkError(err)
 					chCmd <- command
 				}(c)

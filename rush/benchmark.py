@@ -32,7 +32,7 @@ for test in tests:
 
     for keep_order in [False, True]:
         msg = 'keep order: {}'.format(keep_order)
-        n = int((75 - len(msg)) / 2)
+        n = int((70 - len(msg)) / 2)
         sys.stderr.write('{}[ {} ]{}\n'.format('-' * n,  msg, '-' * n))
 
         times = dict()
@@ -52,3 +52,5 @@ for test in tests:
         for app in sorted(times.keys()):
             os.system('md5sum t.{}'.format(os.path.basename(app)))
             os.remove('t.{}'.format(os.path.basename(app)))
+
+        sys.stderr.write('\n')
