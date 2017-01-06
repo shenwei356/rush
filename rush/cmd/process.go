@@ -33,10 +33,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/cznic/sortutil"
 	"github.com/pkg/errors"
+	"github.com/tevino/abool"
 )
 
 // Command is the Command struct
@@ -69,6 +71,10 @@ func NewCommand(id uint64, cmdStr string, cancel chan struct{}, timeout time.Dur
 		Timeout: timeout,
 	}
 	return command
+}
+
+func (c *Command) String() string {
+	return fmt.Sprintf("cmd #%d: %s", c.ID, c.Cmd)
 }
 
 // Verbose decide whether print extra information
@@ -155,6 +161,22 @@ func (c *Command) Cleanup() error {
 	return err
 }
 
+// ExitCode returns the exit code associated with a given error
+func (c *Command) ExitCode() int {
+	if c.Err == nil {
+		return 0
+	}
+	if ex, ok := c.Err.(*exec.ExitError); ok {
+		if st, ok := ex.Sys().(syscall.WaitStatus); ok {
+			return st.ExitStatus()
+		}
+	}
+	return 1
+}
+
+// ErrTimeout means timeout
+var ErrTimeout = fmt.Errorf("time out")
+
 // run a command and save output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
@@ -172,7 +194,6 @@ func (c *Command) run() error {
 	if c.Timeout > 0 {
 		c.ctx, c.ctxCancel = context.WithTimeout(context.Background(), c.Timeout)
 		command = exec.CommandContext(c.ctx, getShell(), "-c", qcmd)
-		defer c.ctxCancel()
 	} else {
 		command = exec.Command(getShell(), "-c", qcmd)
 	}
@@ -192,12 +213,58 @@ func (c *Command) run() error {
 
 	bpipe := bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
 
+	chErr := make(chan error, 1) // may from two sources, must be buffered
+	chEndBeforeTimeout := make(chan struct{})
+
+	// detect timeout
+	if c.Timeout > 0 {
+		go func() { // goroutine #T
+			for {
+				select {
+				case <-c.ctx.Done():
+					chErr <- ErrTimeout
+					c.ctxCancel()
+					return
+				case <-chEndBeforeTimeout:
+					chErr <- nil
+					return
+				}
+			}
+		}()
+	}
+
+	// --------------------------------
+
+	// handle output
 	var readed []byte
-	readed, err = bpipe.Peek(TmpOutputDataBuffer)
+
+	if c.Timeout > 0 {
+		// known shortcoming: this goroutine will remains even after timeout!
+		// this will cause data race.
+		go func() { // goroutine #P
+			// Peek is blocked method, it waits command even after timeout!!
+			readed, err = bpipe.Peek(TmpOutputDataBuffer)
+			chErr <- err
+		}()
+		err = <-chErr // from timeout #T or peek #P
+	} else {
+		readed, err = bpipe.Peek(TmpOutputDataBuffer)
+	}
 
 	// less than TmpOutputDataBuffer bytes in output...
 	if err == bufio.ErrBufferFull || err == io.EOF {
-		err = command.Wait()
+		if c.Timeout > 0 {
+			go func() { // goroutine #W
+				err1 := command.Wait()
+				chErr <- err1
+				close(chEndBeforeTimeout)
+			}()
+			err = <-chErr // from timeout #T or normal exit #W
+			<-chErr       // from normal exit #W or timeout #T
+		} else {
+			err = command.Wait()
+		}
+
 		if err != nil {
 			return errors.Wrapf(err, "wait command: %s", c.Cmd)
 		}
@@ -207,7 +274,7 @@ func (c *Command) run() error {
 
 	// more than TmpOutputDataBuffer bytes in output. must use tmpfile
 	if err != nil {
-		return errors.Wrapf(err, "run command: %s", c.Cmd)
+		return errors.Wrapf(err, "run command #%d: %s", c.ID, c.Cmd)
 	}
 
 	// if Verbose {
@@ -218,7 +285,6 @@ func (c *Command) run() error {
 	if err != nil {
 		return errors.Wrapf(err, "create tmpfile for command: %s", c.Cmd)
 	}
-	// defer c.tmpfh.Close()
 
 	c.tmpfile = c.tmpfh.Name()
 
@@ -234,7 +300,17 @@ func (c *Command) run() error {
 	btmp.Flush()
 	_, err = c.tmpfh.Seek(0, 0)
 	if err == nil {
-		err = command.Wait()
+		if c.Timeout > 0 {
+			go func() { // goroutine #3
+				err1 := command.Wait()
+				close(chEndBeforeTimeout)
+				chErr <- err1
+			}()
+			err = <-chErr // from timeout or normal exit
+			<-chErr       // wait unfinished goroutine
+		} else {
+			err = command.Wait()
+		}
 	}
 	if err != nil {
 		return errors.Wrapf(err, "wait command: %s", c.Cmd)
@@ -401,7 +477,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 
 	chCmd := make(chan *Command, opts.Jobs)
 	done := make(chan int)
-
+	cancelCalled := abool.New()
 	go func() {
 		var wg sync.WaitGroup
 		tokens := make(chan int, opts.Jobs)
@@ -422,15 +498,20 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 				for {
 					err := command.Run()
 					if err != nil { // fail to run
-						if chances == 0 {
+						if chances == 0 || opts.StopOnErr {
 							log.Error(err)
 						} else {
 							log.Warning(err)
 						}
 
 						if opts.StopOnErr {
-							close(cancel)
-							log.Error("stop on first error")
+							if !cancelCalled.IsSet() {
+								cancelCalled.Set()
+								close(cancel)
+								close(chCmd)
+								done <- 1
+								log.Error("stop on first error(s)")
+							}
 							os.Exit(1)
 						}
 						if chances > 0 {

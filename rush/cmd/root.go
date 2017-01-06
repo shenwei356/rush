@@ -238,7 +238,7 @@ func init() {
 	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: second, 0 for no timeout)")
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
-	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on first error")
+	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on first error(s)")
 	// RootCmd.Flags().BoolP("continue", "c", false, `continue run commands except for finished commands in "finished.txt"`)
 	RootCmd.Flags().BoolP("dry-run", "", false, "print command but not run")
 
@@ -257,9 +257,10 @@ func init() {
                  : echo dir/file.txt.gz | rush 'echo {%.}'   # file.txt
   8. basename without last extension
                  : echo dir/file.txt.gz | rush 'echo {%:}'   # file
-  9. job ID, combine fields and other replacement string
+  9. job ID, combine fields and other replacement strings
                  : echo 123 file.txt | rush 'echo job {#}: {2} {2.} {1}'
-                 # job 1: file.txt file 123`
+                 # job 1: file.txt file 123
+  More examples: https://github.com/shenwei356/rush`
 
 	RootCmd.SetUsageTemplate(`Usage:{{if .Runnable}}
   {{if .HasAvailableFlags}}{{appendIfNotPresent .UseLine "[flags]"}}{{else}}{{.UseLine}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
@@ -368,8 +369,8 @@ func getConfigs(cmd *cobra.Command) Config {
 
 		KeepOrder: getFlagBool(cmd, "keep-order"),
 		StopOnErr: getFlagBool(cmd, "stop-on-error"),
-		Continue:  getFlagBool(cmd, "continue"),
-		DryRun:    getFlagBool(cmd, "dry-run"),
+		// Continue:  getFlagBool(cmd, "continue"),
+		DryRun: getFlagBool(cmd, "dry-run"),
 
 		// BufferSize: getFlagPositiveInt(cmd, "buffer-size") * 1048576,
 

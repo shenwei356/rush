@@ -5,3 +5,4 @@ rush/t.*
 rush/pprof
 rush/mprof
 doc/site*
+*ssshtest
