@@ -177,6 +177,18 @@ func (c *Command) ExitCode() int {
 // ErrTimeout means timeout
 var ErrTimeout = fmt.Errorf("time out")
 
+func splitCmdAndArgs(command string) (string, string) {
+	var c, args string
+	command = strings.Trim(command, " ")
+	i := strings.Index(command, " ")
+	if i >= 0 {
+		c = strings.Trim(command[0:i], " ")
+		args = strings.Trim(command[i:], " ")
+		return c, args
+	}
+	return command, ""
+}
+
 // run a command and save output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
@@ -193,9 +205,19 @@ func (c *Command) run() error {
 
 	if c.Timeout > 0 {
 		c.ctx, c.ctxCancel = context.WithTimeout(context.Background(), c.Timeout)
-		command = exec.CommandContext(c.ctx, getShell(), "-c", qcmd)
+		if runtime.GOOS == "windows" {
+			exe, args := splitCmdAndArgs(qcmd)
+			command = exec.CommandContext(c.ctx, exe, args)
+		} else {
+			command = exec.CommandContext(c.ctx, getShell(), "-c", qcmd)
+		}
 	} else {
-		command = exec.Command(getShell(), "-c", qcmd)
+		if runtime.GOOS == "windows" {
+			exe, args := splitCmdAndArgs(qcmd)
+			command = exec.Command(exe, args)
+		} else {
+			command = exec.Command(getShell(), "-c", qcmd)
+		}
 	}
 
 	pipeStdout, err := command.StdoutPipe()
