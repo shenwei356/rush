@@ -25,6 +25,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/signal"
 	"regexp"
 	"runtime"
 	"strings"
@@ -122,7 +123,14 @@ Source code: https://github.com/shenwei356/rush
 			return 0, nil, nil
 		}
 
+		// ---------------------------------------------------------------
+
 		cancel := make(chan struct{})
+
+		donePreprocess := make(chan int)
+
+		// channel of command
+		chCmdStr := make(chan string, config.Jobs)
 
 		for _, file := range config.Infiles {
 			// input file handler
@@ -135,15 +143,7 @@ Source code: https://github.com/shenwei356/rush
 				defer infh.Close()
 			}
 
-			// ---------------------------------------------------------------
-
-			// channel of command
-			chCmdStr := make(chan string, config.Jobs)
-
-			// ---------------------------------------------------------------
-
 			// read data and generate command
-			donePreprocess := make(chan int)
 			go func() {
 				scanner := bufio.NewScanner(infh)
 				// 2147483647: max int32
@@ -191,36 +191,56 @@ Source code: https://github.com/shenwei356/rush
 				donePreprocess <- 1
 			}()
 
-			// ---------------------------------------------------------------
-
-			// run
-			chOutput, doneSendOutput := Run4Output(opts, cancel, chCmdStr)
-
-			// read from chOutput and print
-			doneOutput := make(chan int)
-			go func() {
-				last := time.Now().Add(2 * time.Second)
-				for c := range chOutput {
-					outfh.WriteString(c)
-
-					if t := time.Now(); t.After(last) {
-						outfh.Flush()
-						last = t.Add(2 * time.Second)
-					}
-				}
-				outfh.Flush()
-
-				doneOutput <- 1
-			}()
-
-			// ---------------------------------------------------------------
-
-			// the order is very important!
-			<-donePreprocess // finish read data and send command
-			<-doneSendOutput // finish send output
-			<-doneOutput     // finish print output
-
 		}
+		// ---------------------------------------------------------------
+
+		// run
+		chOutput, doneSendOutput := Run4Output(opts, cancel, chCmdStr)
+
+		// read from chOutput and print
+		doneOutput := make(chan int)
+		go func() {
+			last := time.Now().Add(2 * time.Second)
+			for c := range chOutput {
+				outfh.WriteString(c)
+
+				if t := time.Now(); t.After(last) {
+					outfh.Flush()
+					last = t.Add(2 * time.Second)
+				}
+			}
+			outfh.Flush()
+
+			doneOutput <- 1
+		}()
+
+		// ---------------------------------------------------------------
+
+		chExitSignalMonitor := make(chan struct{})
+		signalChan := make(chan os.Signal, 1)
+		cleanupDone := make(chan bool)
+		signal.Notify(signalChan, os.Interrupt)
+		go func() {
+			select {
+			case <-signalChan:
+				log.Criticalf("received an interrupt, stopping commands..")
+				close(cancel)
+				cleanupDone <- true
+				outfh.Flush()
+				return
+			case <-chExitSignalMonitor:
+				cleanupDone <- true
+				return
+			}
+		}()
+
+		// the order is very important!
+		<-donePreprocess // finish read data and send command
+		<-doneSendOutput // finish send output
+		<-doneOutput     // finish print output
+
+		close(chExitSignalMonitor)
+		<-cleanupDone
 	},
 }
 

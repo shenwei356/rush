@@ -64,7 +64,7 @@ fn_check_verbose() {
 run verbose fn_check_verbose
 assert_equal $(cat $STDOUT_FILE | wc -l) 10
 assert_equal $(cat $STDERR_FILE | grep "start" | wc -l) 10
-assert_equal $(cat $STDERR_FILE | grep "finish" | wc -l) 11 # another summary
+assert_equal $(cat $STDERR_FILE | grep "finish" | wc -l) 10
 
 # -------------------------------------------------
 

@@ -603,9 +603,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		}
 		wg.Wait()
 		close(chCmd)
-		if Verbose {
-			log.Infof("finish running all %d commands", id-1)
-		}
+
 		done <- 1
 	}()
 
