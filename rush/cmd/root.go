@@ -73,16 +73,19 @@ Source code: https://github.com/shenwei356/rush
 
 		// -----------------------------------------------------------------
 
-		cancel := make(chan struct{})
 		// TmpOutputDataBuffer = config.BufferSize
+		if config.DryRun {
+			config.Verbose = false
+		}
 		opts := &Options{
-			DryRun:    config.DryRun,
-			Jobs:      config.Jobs,
-			KeepOrder: config.KeepOrder,
-			Retries:   config.Retries,
-			Timeout:   time.Duration(config.Timeout) * time.Second,
-			StopOnErr: config.StopOnErr,
-			Verbose:   config.Verbose,
+			DryRun:        config.DryRun,
+			Jobs:          config.Jobs,
+			KeepOrder:     config.KeepOrder,
+			Retries:       config.Retries,
+			RetryInterval: time.Duration(config.RetryInterval) * time.Second,
+			Timeout:       time.Duration(config.Timeout) * time.Second,
+			StopOnErr:     config.StopOnErr,
+			Verbose:       config.Verbose,
 		}
 
 		// out file handler
@@ -119,6 +122,8 @@ Source code: https://github.com/shenwei356/rush
 			return 0, nil, nil
 		}
 
+		cancel := make(chan struct{})
+
 		for _, file := range config.Infiles {
 			// input file handler
 			var infh *os.File
@@ -141,16 +146,22 @@ Source code: https://github.com/shenwei356/rush
 			donePreprocess := make(chan int)
 			go func() {
 				scanner := bufio.NewScanner(infh)
+				// 2147483647: max int32
 				scanner.Buffer(make([]byte, 0, 16384), 2147483647)
 				scanner.Split(split)
 
 				n := config.NRecords
 				var id uint64 = 1
 
+				var record string
 				var records []string
 				records = make([]string, 0, n)
 				for scanner.Scan() {
-					records = append(records, scanner.Text())
+					record = scanner.Text()
+					if record == "" {
+						continue
+					}
+					records = append(records, record)
 
 					if len(records) == n {
 						chCmdStr <- fillCommand(config, command0, Chunk{ID: id, Data: records})
@@ -175,7 +186,7 @@ Source code: https://github.com/shenwei356/rush
 
 			// ---------------------------------------------------------------
 
-			// output
+			// run
 			chOutput, doneSendOutput := Run4Output(opts, cancel, chCmdStr)
 
 			// read from chOutput and print
@@ -197,6 +208,18 @@ Source code: https://github.com/shenwei356/rush
 
 			// ---------------------------------------------------------------
 
+			// signalChan := make(chan os.Signal, 1)
+			// cleanupDone := make(chan bool)
+			// signal.Notify(signalChan, os.Interrupt)
+			// go func() {
+			// 	for _ = range signalChan {
+			// 		fmt.Println("\nReceived an interrupt, stopping services..")
+			// 		close(cancel)
+			// 		cleanupDone <- true
+			// 	}
+			// }()
+			// <-cleanupDone
+
 			// the order is very important!
 			<-donePreprocess // finish read data and send command
 			<-doneSendOutput // finish send output
@@ -205,7 +228,7 @@ Source code: https://github.com/shenwei356/rush
 	},
 }
 
-// Chunk is []string with ID
+// Chunk contains input data records sent to a command
 type Chunk struct {
 	ID   uint64
 	Data []string
@@ -224,18 +247,18 @@ func init() {
 	RootCmd.Flags().BoolP("verbose", "", false, "print verbose information")
 	RootCmd.Flags().BoolP("version", "V", false, `print version information and check for update`)
 
-	RootCmd.Flags().IntP("jobs", "j", runtime.NumCPU(), "run n jobs in parallel")
+	RootCmd.Flags().IntP("jobs", "j", runtime.NumCPU(), "run n jobs in parallel (default value depends on your device)")
 	RootCmd.Flags().StringP("out-file", "o", "-", `out file ("-" for stdout)`)
 
-	RootCmd.Flags().StringSliceP("infile", "i", []string{}, "input data file")
+	RootCmd.Flags().StringSliceP("infile", "i", []string{}, "input data file, multi-values supported")
 
-	RootCmd.Flags().StringP("record-delimiter", "D", "\n", `record delimiter (default is "\n")`)
+	RootCmd.Flags().StringP("record-delimiter", "D", "\n", `record delimiter, supports regular expression (default is "\n")`)
 	RootCmd.Flags().IntP("nrecords", "n", 1, "number of records sent to a command")
-	RootCmd.Flags().StringP("field-delimiter", "d", `\s+`, "field delimiter in records")
+	RootCmd.Flags().StringP("field-delimiter", "d", `\s+`, "field delimiter in records, support regular expression")
 
-	RootCmd.Flags().IntP("retries", "r", 0, "maximum retries")
-	RootCmd.Flags().IntP("retry-interval", "", 0, "retry interval (unit: second)")
-	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: second, 0 for no timeout)")
+	RootCmd.Flags().IntP("retries", "r", 0, "maximum retries (default 0)")
+	RootCmd.Flags().IntP("retry-interval", "", 0, "retry interval (unit: second) (default 0)")
+	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: second, 0 for no timeout) (default 0)")
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
 	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on first error(s)")
@@ -247,19 +270,29 @@ func init() {
 	RootCmd.Flags().StringSliceP("assign", "v", []string{}, "assign the value val to the variable var (format: var=val)")
 	RootCmd.Flags().StringP("trim", "", "", `trim white space in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)`)
 
-	RootCmd.Example = `  1. simple run  : seq 1 10 | rush echo {}  # quoting is not necessary
-  2. keep order  : seq 1 10 | rush 'echo {}' -k
-  3. with timeout: seq 1 | rush 'sleep 2; echo {}' -t 1
-  4. retry       : seq 1 | rush 'python script.py' -r 3
-  5. basename    : echo dir/file.txt.gz | rush 'echo {%}'　　# file.txt.gz
-  6. dirname     : echo dir/file.txt.gz | rush 'echo {/}'    # dir
-  7. basename without last extension
-                 : echo dir/file.txt.gz | rush 'echo {%.}'   # file.txt
-  8. basename without last extension
-                 : echo dir/file.txt.gz | rush 'echo {%:}'   # file
-  9. job ID, combine fields and other replacement strings
-                 : echo 123 file.txt | rush 'echo job {#}: {2} {2.} {1}'
-                 # job 1: file.txt file 123
+	RootCmd.Example = `  1. simple run, quoting is not necessary
+      $ seq 1 10 | rush echo {}
+  2. keep order
+      $ seq 1 10 | rush 'echo {}' -k
+  3. timeout
+      $ seq 1 | rush 'sleep 2; echo {}' -t 1
+  4. retry
+      $ seq 1 | rush 'python script.py' -r 3
+  5. dirname & basename
+      $ echo dir/file.txt.gz | rush 'echo {/} {%}'
+      dir file.txt.gz
+  6. basename without last or any extension
+      $ echo dir/file.txt.gz | rush 'echo {%.} {%:}'
+      file.txt file
+  7. job ID, combine fields and other replacement strings
+      $ echo 123 file.txt | rush 'echo job {#}: {2} {2.}'
+      job 1: file.txt file
+  8. custom field delimiter
+      $ echo a=b=c | rush 'echo {1} {2} {3}' -d =
+      a b c
+  9. assign value to variable, like "awk -v"
+      $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
+      Hello, Wei Shen!
   More examples: https://github.com/shenwei356/rush`
 
 	RootCmd.SetUsageTemplate(`Usage:{{if .Runnable}}

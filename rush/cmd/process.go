@@ -43,23 +43,22 @@ import (
 
 // Command is the Command struct
 type Command struct {
-	ID  uint64
-	Cmd string
+	ID  uint64 // ID
+	Cmd string // command
 
-	Cancel    chan struct{}
-	Timeout   time.Duration
-	ctx       context.Context
-	ctxCancel context.CancelFunc
+	Cancel    chan struct{}      // channel for close
+	Timeout   time.Duration      // time out
+	ctx       context.Context    // context.WithTimeout
+	ctxCancel context.CancelFunc // cancel func for timetout
 
-	Ch               chan string // buffer for output
-	finishSendOutput bool
+	Ch               chan string   // channel for stdout
+	reader           *bufio.Reader // reader for stdout
+	tmpfile          string        // tmpfile for stdout
+	tmpfh            *os.File      // file handler for tmpfile
+	finishSendOutput bool          // a flag of whether finished sending output to Ch
 
-	Err      error
-	Duration time.Duration
-
-	reader  *bufio.Reader
-	tmpfile string
-	tmpfh   *os.File
+	Err      error         // Error
+	Duration time.Duration // runtime
 }
 
 // NewCommand create a Command
@@ -174,8 +173,11 @@ func (c *Command) ExitCode() int {
 	return 1
 }
 
-// ErrTimeout means timeout
+// ErrTimeout means command timeout
 var ErrTimeout = fmt.Errorf("time out")
+
+// ErrCancelled means command being cancelled
+var ErrCancelled = fmt.Errorf("cancelled")
 
 func splitCmdAndArgs(command string) (string, string) {
 	var c, args string
@@ -189,14 +191,17 @@ func splitCmdAndArgs(command string) (string, string) {
 	return command, ""
 }
 
-// run a command and save output to c.reader.
+// run a command and pass output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
 func (c *Command) run() error {
 	t := time.Now()
+	chCancelMonitor := make(chan struct{})
 	defer func() {
+		close(chCancelMonitor)
 		c.Duration = time.Now().Sub(t)
 	}()
+
 	var command *exec.Cmd
 	qcmd := fmt.Sprintf(`%s`, c.Cmd)
 	if Verbose {
@@ -222,7 +227,7 @@ func (c *Command) run() error {
 
 	pipeStdout, err := command.StdoutPipe()
 	if err != nil {
-		return errors.Wrapf(err, "get stdout pipe of command: %s", c.Cmd)
+		return errors.Wrapf(err, "get stdout pipe of cmd #%d: %s", c.ID, c.Cmd)
 	}
 	defer pipeStdout.Close()
 
@@ -230,13 +235,27 @@ func (c *Command) run() error {
 
 	err = command.Start()
 	if err != nil {
-		checkError(errors.Wrapf(err, "start command: %s", c.Cmd))
+		checkError(errors.Wrapf(err, "start cmd #%d: %s", c.ID, c.Cmd))
 	}
 
 	bpipe := bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
 
-	chErr := make(chan error, 1) // may from two sources, must be buffered
+	chErr := make(chan error, 1) // may come from two sources, must be buffered
 	chEndBeforeTimeout := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-c.Cancel:
+				chErr <- ErrCancelled
+				log.Infof("cancel cmd #%d: %s", c.ID, c.Cmd)
+				command.Process.Kill()
+				return
+			case <-chCancelMonitor:
+				return
+			}
+		}
+	}()
 
 	// detect timeout
 	if c.Timeout > 0 {
@@ -288,7 +307,7 @@ func (c *Command) run() error {
 		}
 
 		if err != nil {
-			return errors.Wrapf(err, "wait command: %s", c.Cmd)
+			return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 		}
 		c.reader = bufio.NewReader(bytes.NewReader(readed))
 		return nil
@@ -296,7 +315,7 @@ func (c *Command) run() error {
 
 	// more than TmpOutputDataBuffer bytes in output. must use tmpfile
 	if err != nil {
-		return errors.Wrapf(err, "run command #%d: %s", c.ID, c.Cmd)
+		return errors.Wrapf(err, "run cmd #%d: %s", c.ID, c.Cmd)
 	}
 
 	// if Verbose {
@@ -305,7 +324,7 @@ func (c *Command) run() error {
 
 	c.tmpfh, err = ioutil.TempFile("", tmpfilePrefix)
 	if err != nil {
-		return errors.Wrapf(err, "create tmpfile for command: %s", c.Cmd)
+		return errors.Wrapf(err, "create tmpfile for cmd #%d: %s", c.ID, c.Cmd)
 	}
 
 	c.tmpfile = c.tmpfh.Name()
@@ -335,7 +354,7 @@ func (c *Command) run() error {
 		}
 	}
 	if err != nil {
-		return errors.Wrapf(err, "wait command: %s", c.Cmd)
+		return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 	}
 
 	return nil
@@ -343,13 +362,14 @@ func (c *Command) run() error {
 
 // Options contains the options
 type Options struct {
-	DryRun    bool          // just print command
-	Jobs      int           // max jobs number
-	KeepOrder bool          // keep output order
-	Retries   int           // max retry chances
-	Timeout   time.Duration // timeout
-	StopOnErr bool          // stop on any error
-	Verbose   bool
+	DryRun        bool          // just print command
+	Jobs          int           // max jobs number
+	KeepOrder     bool          // keep output order
+	Retries       int           // max retry chances
+	RetryInterval time.Duration // retry interval
+	Timeout       time.Duration // timeout
+	StopOnErr     bool          // stop on any error
+	Verbose       bool
 }
 
 // Run4Output runs commands in parallel from channel chCmdStr,
@@ -401,7 +421,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 							for line = range c.Ch {
 								chOut <- line
 							}
-							checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
+							checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd #%d: %s", c.ID, c.Cmd))
 							break LOOP
 						}
 					}
@@ -412,7 +432,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 				}(c)
 			}
 
-		} else { // keep drder
+		} else { // keep order
 			wg.Add(1)
 
 			var id uint64 = 1
@@ -534,7 +554,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 								done <- 1
 								log.Error("stop on first error(s)")
 							}
-							os.Exit(1)
+							os.Exit(1) // too violent
 						}
 						if chances > 0 {
 							if Verbose && opts.Retries > 0 {
@@ -543,6 +563,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 									opts.Retries, command.Cmd)
 							}
 							chances--
+							<-time.After(opts.RetryInterval)
 							continue
 						}
 						return
