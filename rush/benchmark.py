@@ -20,7 +20,7 @@ tests = [
 
 apps = {'parallel': {'jobs': '-j', 'keep-order': '-k'},
         'gargs': {'jobs': '-p', 'keep-order': '-o'},
-        './rush': {'jobs': '-j', 'keep-order': '-k'}}
+        'rush': {'jobs': '-j', 'keep-order': '-k'}}
 
 repeats = 1
 njobs = 4

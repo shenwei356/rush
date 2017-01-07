@@ -157,6 +157,13 @@ Source code: https://github.com/shenwei356/rush
 				var records []string
 				records = make([]string, 0, n)
 				for scanner.Scan() {
+					select {
+					case <-cancel:
+						log.Debugf("cancel sending data")
+						break
+					default:
+					}
+
 					record = scanner.Text()
 					if record == "" {
 						continue
@@ -208,22 +215,11 @@ Source code: https://github.com/shenwei356/rush
 
 			// ---------------------------------------------------------------
 
-			// signalChan := make(chan os.Signal, 1)
-			// cleanupDone := make(chan bool)
-			// signal.Notify(signalChan, os.Interrupt)
-			// go func() {
-			// 	for _ = range signalChan {
-			// 		fmt.Println("\nReceived an interrupt, stopping services..")
-			// 		close(cancel)
-			// 		cleanupDone <- true
-			// 	}
-			// }()
-			// <-cleanupDone
-
 			// the order is very important!
 			<-donePreprocess // finish read data and send command
 			<-doneSendOutput // finish send output
 			<-doneOutput     // finish print output
+
 		}
 	},
 }

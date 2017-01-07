@@ -240,36 +240,31 @@ func (c *Command) run() error {
 
 	bpipe := bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
 
-	chErr := make(chan error, 1) // may come from two sources, must be buffered
+	chErr := make(chan error, 2) // may come from three sources, must be buffered
 	chEndBeforeTimeout := make(chan struct{})
 
 	go func() {
-		for {
-			select {
-			case <-c.Cancel:
-				chErr <- ErrCancelled
-				log.Infof("cancel cmd #%d: %s", c.ID, c.Cmd)
-				command.Process.Kill()
-				return
-			case <-chCancelMonitor:
-				return
-			}
+		select {
+		case <-c.Cancel:
+			chErr <- ErrCancelled
+			log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
+			command.Process.Kill()
+		case <-chCancelMonitor:
+			// default:  // must not use default, if you must use, use for loop
 		}
 	}()
 
 	// detect timeout
 	if c.Timeout > 0 {
 		go func() { // goroutine #T
-			for {
-				select {
-				case <-c.ctx.Done():
-					chErr <- ErrTimeout
-					c.ctxCancel()
-					return
-				case <-chEndBeforeTimeout:
-					chErr <- nil
-					return
-				}
+			select {
+			case <-c.ctx.Done():
+				chErr <- ErrTimeout
+				c.ctxCancel()
+				return
+			case <-chEndBeforeTimeout:
+				chErr <- nil
+				return
 			}
 		}()
 	}
@@ -390,6 +385,13 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 			var line string
 
 			for c := range chCmd {
+				select {
+				case <-cancel:
+					// log.Debugf("cancel receiving cmd from chCmd")
+					break
+				default: // needed
+				}
+
 				wg.Add(1)
 				tokens <- 1
 
@@ -414,8 +416,11 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 						select {
 						case chOut <- <-c.Ch:
 						case <-cancel:
+							// log.Debugf("cancel receiving output from cmd")
 							break LOOP
+						default: // needed
 						}
+
 						if c.finishSendOutput {
 							// do not forget the left data
 							for line = range c.Ch {
@@ -441,6 +446,13 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 			var line string
 			cmds := make(map[uint64]*Command)
 			for c = range chCmd {
+				select {
+				case <-cancel:
+					// log.Debugf("cancel receiving cmd from chCmd")
+					break
+				default: // needed
+				}
+
 				if c.ID == id { // your turn
 					if opts.DryRun {
 						chOut <- c.Cmd + "\n"
@@ -524,7 +536,20 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		var wg sync.WaitGroup
 		tokens := make(chan int, opts.Jobs)
 		var id uint64 = 1
+		var stop bool
+	FLAG:
 		for cmdStr := range chCmdStr {
+			select {
+			case <-cancel:
+				// log.Debugf("cancel receiving cmdStr from chCmdStr")
+				break FLAG
+			default: // needed
+			}
+
+			if stop {
+				break
+			}
+
 			wg.Add(1)
 			tokens <- 1
 
@@ -554,7 +579,8 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 								done <- 1
 								log.Error("stop on first error(s)")
 							}
-							os.Exit(1) // too violent
+							stop = true
+							return
 						}
 						if chances > 0 {
 							if Verbose && opts.Retries > 0 {
@@ -575,7 +601,6 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 			}(id, cmdStr)
 			id++
 		}
-
 		wg.Wait()
 		close(chCmd)
 		if Verbose {
