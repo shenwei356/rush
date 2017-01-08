@@ -33,15 +33,12 @@
 
 Major:
 
-- [x] record delimiter (`-D`, default `\n`),
-  records sending to every command (`-n`, default `1`),
-  and field delimiter (`-d`, default `\s+`).
-- [x] keep output order, may use temporary file
-- [x] support timeout and retry
+- [x] **support timeout and retry**
+- [x] **support continue**
+- [x] **safe exit when [capturing ctrl+c](https://nathanleclaire.com/blog/2014/08/24/handling-ctrl-c-interrupt-signal-in-golang-programs/)**
 - [x] support exit on fist error(s)
-- [x] support continue,
-  save status after [capturing ctrl+c](https://nathanleclaire.com/blog/2014/08/24/handling-ctrl-c-interrupt-signal-in-golang-programs/)
-- [x] Replacement strings (like GNU parallel):
+- [x] **`awk -v` like custom defined variables**
+- [x] **practical replacement strings** (like GNU parallel):
     - [x] `{#}`, job ID
     - [x] `{}`, full data
     - [x] support positional replacement strings: `{n}`
@@ -55,7 +52,10 @@ Major:
     - [x] combinations:
         - [x] `{%.}`, `{%:}`, basename without extension
         - [x] `{n.}`, `{n/}`, manipulate nth field
-- [x] `awk -v` like defined variables
+- [x] **custom record delimiter** (`-D`, default `\n`),
+  settable records sending to every command (`-n`, default `1`),
+  and field delimiter (`-d`, default `\s+`).
+- [x] keep output order, may use temporary file
 - [ ] appropriate quoting
 
 Minor:
