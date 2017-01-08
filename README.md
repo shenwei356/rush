@@ -218,8 +218,9 @@ See on [release page](https://github.com/shenwei356/rush/releases).
    jobs. Luckly, it's accomplished in one run :smile:
 
         $ for f in $(seq 2014 2016); do \
-            /bin/rm -rf $f; mkdir -p $f; \
-            cat $f.html.txt | rush -v d=$f -d = 'phantomjs save_page.js "{}" > {d}/{3}.html' -j 20 -t 60 -r 3 -c; done
+        $    /bin/rm -rf $f; mkdir -p $f; \
+        $    cat $f.html.txt | rush -v d=$f -d = 'phantomjs save_page.js "{}" > {d}/{3}.html' -j 20 -t 60 -r 3 -c; \
+        $ done
 
 
 ## Usage
