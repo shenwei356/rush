@@ -38,22 +38,24 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 	if len(founds) == 0 {
 		return command
 	}
-	fieldsStr := strings.Join(chunk.Data, config.RecordDelimiter)
-	switch config.Trim {
-	case "l":
-		fieldsStr = strings.TrimLeft(fieldsStr, " \t")
-	case "r":
-		fieldsStr = strings.TrimRight(fieldsStr, " \t")
-	case "lr", "rl", "b":
-		fieldsStr = strings.Trim(fieldsStr, " \t")
+
+	records := make([]string, len(chunk.Data))
+	for i, r := range chunk.Data {
+		switch config.Trim {
+		case "l":
+			records[i] = strings.TrimLeft(r, " \t\n")
+		case "r":
+			records[i] = strings.TrimRight(r, " \t\n")
+		case "lr", "rl", "b":
+			records[i] = strings.Trim(r, " \t\n")
+		default:
+			records[i] = r
+		}
 	}
 
+	fieldsStr := strings.Join(records, " ")
+
 	var fields []string
-	if config.RecordDelimiter == config.FieldDelimiter {
-		fields = chunk.Data
-	} else {
-		fields = config.reFieldDelimiter.Split(fieldsStr, -1)
-	}
 
 	var chars, char, target string
 	var charsGroups []string
@@ -79,9 +81,14 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 					if i == 0 {
 						target = fieldsStr
 					} else {
+						if len(fields) == 0 {
+							fields = config.reFieldDelimiter.Split(fieldsStr, -1)
+						}
+
 						if i > len(fields) {
 							i = len(fields)
 						}
+
 						target = fields[i-1]
 					}
 					i = 1
