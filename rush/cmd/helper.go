@@ -23,7 +23,10 @@ package cmd
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
+
+	"github.com/shenwei356/breader"
 )
 
 // VERSION of this package
@@ -54,4 +57,29 @@ func checkVersion() {
 	} else {
 		fmt.Printf("New version available: %s %s at %s\n", app, version, resp.Request.URL.String())
 	}
+}
+
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+func readSuccCmds(file string) map[string]struct{} {
+	reader, err := breader.NewDefaultBufferedReader(file)
+	checkError(err)
+
+	cmds := make(map[string]struct{})
+	for chunk := range reader.Ch {
+		checkError(chunk.Err)
+		for _, data := range chunk.Data {
+			cmds[data.(string)] = struct{}{}
+		}
+	}
+	return cmds
 }

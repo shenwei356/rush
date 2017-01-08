@@ -359,24 +359,25 @@ func (c *Command) run() error {
 
 // Options contains the options
 type Options struct {
-	DryRun        bool          // just print command
-	Jobs          int           // max jobs number
-	KeepOrder     bool          // keep output order
-	Retries       int           // max retry chances
-	RetryInterval time.Duration // retry interval
-	Timeout       time.Duration // timeout
-	StopOnErr     bool          // stop on any error
-	Verbose       bool
+	DryRun              bool          // just print command
+	Jobs                int           // max jobs number
+	KeepOrder           bool          // keep output order
+	Retries             int           // max retry chances
+	RetryInterval       time.Duration // retry interval
+	Timeout             time.Duration // timeout
+	StopOnErr           bool          // stop on any error
+	RecordSuccessfulCmd bool          // send sucessful command to chanel
+	Verbose             bool
 }
 
 // Run4Output runs commands in parallel from channel chCmdStr,
 // and returns an output text channel,
 // and a done channel to ensure safe exit.
-func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan string, chan int) {
+func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan string, chan string, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
-	chCmd, doneChCmd := Run(opts, cancel, chCmdStr)
+	chCmd, chSuccessfulCmd, doneChCmd := Run(opts, cancel, chCmdStr)
 	chOut := make(chan string, opts.Jobs)
 	done := make(chan int)
 
@@ -528,20 +529,25 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 		// }
 		done <- 1
 	}()
-	return chOut, done
+	return chOut, chSuccessfulCmd, done
 }
 
 // Run runs commands in parallel from channel chCmdStr，
 // and returns a Command channel,
 // and a done channel to ensure safe exit.
-func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Command, chan int) {
+func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Command, chan string, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
 
 	chCmd := make(chan *Command, opts.Jobs)
+	var chSuccessfulCmd chan string
+	if opts.RecordSuccessfulCmd {
+		chSuccessfulCmd = make(chan string, opts.Jobs)
+	}
 	done := make(chan int)
 	cancelCalled := abool.New()
+
 	go func() {
 		var wg sync.WaitGroup
 		tokens := make(chan int, opts.Jobs)
@@ -588,6 +594,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 								cancelCalled.Set()
 								close(cancel)
 								close(chCmd)
+								if opts.RecordSuccessfulCmd {
+									close(chSuccessfulCmd)
+								}
 								done <- 1
 								log.Error("stop on first error(s)")
 							}
@@ -607,6 +616,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 						return
 					}
 					chCmd <- command
+					if opts.RecordSuccessfulCmd {
+						chSuccessfulCmd <- cmdStr
+					}
 					break
 				}
 
@@ -615,9 +627,11 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		}
 		wg.Wait()
 		close(chCmd)
+		if opts.RecordSuccessfulCmd {
+			close(chSuccessfulCmd)
+		}
 
 		done <- 1
 	}()
-
-	return chCmd, done
+	return chCmd, chSuccessfulCmd, done
 }

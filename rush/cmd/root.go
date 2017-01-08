@@ -74,21 +74,6 @@ Source code: https://github.com/shenwei356/rush
 
 		// -----------------------------------------------------------------
 
-		// TmpOutputDataBuffer = config.BufferSize
-		if config.DryRun {
-			config.Verbose = false
-		}
-		opts := &Options{
-			DryRun:        config.DryRun,
-			Jobs:          config.Jobs,
-			KeepOrder:     config.KeepOrder,
-			Retries:       config.Retries,
-			RetryInterval: time.Duration(config.RetryInterval) * time.Second,
-			Timeout:       time.Duration(config.Timeout) * time.Second,
-			StopOnErr:     config.StopOnErr,
-			Verbose:       config.Verbose,
-		}
-
 		// out file handler
 		var outfh *bufio.Writer
 		if isStdin(config.OutFile) {
@@ -96,12 +81,48 @@ Source code: https://github.com/shenwei356/rush
 		} else {
 			var fh *os.File
 			fh, err = os.Create(config.OutFile)
+			checkError(err)
 			defer fh.Close()
 
 			outfh = bufio.NewWriter(fh)
-			checkError(err)
 		}
 		defer outfh.Flush()
+
+		// TmpOutputDataBuffer = config.BufferSize
+		if config.DryRun {
+			config.Verbose = false
+		}
+
+		var succCmds = make(map[string]struct{})
+		var bfhSuccCmds *bufio.Writer
+		if config.Continue {
+			var existed bool
+			existed, err = exists(config.SuccCmdFile)
+			checkError(err)
+			if existed {
+				succCmds = readSuccCmds(config.SuccCmdFile)
+			}
+
+			var fhSuccCmds *os.File
+			fhSuccCmds, err = os.Create(config.SuccCmdFile)
+			checkError(err)
+			defer fhSuccCmds.Close()
+
+			bfhSuccCmds = bufio.NewWriter(fhSuccCmds)
+			defer bfhSuccCmds.Flush()
+		}
+
+		opts := &Options{
+			DryRun:              config.DryRun,
+			Jobs:                config.Jobs,
+			KeepOrder:           config.KeepOrder,
+			Retries:             config.Retries,
+			RetryInterval:       time.Duration(config.RetryInterval) * time.Second,
+			Timeout:             time.Duration(config.Timeout) * time.Second,
+			StopOnErr:           config.StopOnErr,
+			Verbose:             config.Verbose,
+			RecordSuccessfulCmd: config.Continue,
+		}
 
 		if len(config.Infiles) == 0 {
 			config.Infiles = append(config.Infiles, "-")
@@ -157,7 +178,8 @@ Source code: https://github.com/shenwei356/rush
 				var record string
 				var records []string
 				records = make([]string, 0, n)
-
+				var cmdStr string
+				var runned bool
 				for scanner.Scan() {
 					select {
 					case <-cancel:
@@ -175,14 +197,34 @@ Source code: https://github.com/shenwei356/rush
 					records = append(records, record)
 
 					if len(records) == n {
-						chCmdStr <- fillCommand(config, command0, Chunk{ID: id, Data: records})
+						cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
+						if config.Continue {
+							if _, runned = succCmds[cmdStr]; runned {
+								log.Infof("ignore cmd #%d: %s", id, cmdStr)
+								bfhSuccCmds.WriteString(cmdStr + "\n")
+							} else {
+								chCmdStr <- cmdStr
+							}
+						} else {
+							chCmdStr <- cmdStr
+						}
+
 						id++
 						records = make([]string, 0, n)
 					}
 				}
 				if len(records) > 0 {
-					chCmdStr <- fillCommand(config, command0, Chunk{ID: id, Data: records})
-					id++
+					cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
+					if config.Continue {
+						if _, runned = succCmds[cmdStr]; runned {
+							log.Infof("ignore previously finished cmd #%d: %s", id, cmdStr)
+							bfhSuccCmds.WriteString(cmdStr + "\n")
+						} else {
+							chCmdStr <- cmdStr
+						}
+					} else {
+						chCmdStr <- cmdStr
+					}
 				}
 
 				checkError(errors.Wrap(scanner.Err(), "read input data"))
@@ -197,7 +239,7 @@ Source code: https://github.com/shenwei356/rush
 		// ---------------------------------------------------------------
 
 		// run
-		chOutput, doneSendOutput := Run4Output(opts, cancel, chCmdStr)
+		chOutput, chSuccessfulCmd, doneSendOutput := Run4Output(opts, cancel, chCmdStr)
 
 		// read from chOutput and print
 		doneOutput := make(chan int)
@@ -216,6 +258,15 @@ Source code: https://github.com/shenwei356/rush
 			doneOutput <- 1
 		}()
 
+		doneSaveSuccCmd := make(chan int)
+		if config.Continue {
+			go func() {
+				for c := range chSuccessfulCmd {
+					bfhSuccCmds.WriteString(c + "\n")
+				}
+				doneSaveSuccCmd <- 1
+			}()
+		}
 		// ---------------------------------------------------------------
 
 		chExitSignalMonitor := make(chan struct{})
@@ -225,7 +276,7 @@ Source code: https://github.com/shenwei356/rush
 		go func() {
 			select {
 			case <-signalChan:
-				log.Criticalf("received an interrupt, stopping commands..")
+				log.Criticalf("received an interrupt, stopping unfinished commands...")
 				close(cancel)
 				cleanupDone <- 1
 				return
@@ -234,11 +285,13 @@ Source code: https://github.com/shenwei356/rush
 				return
 			}
 		}()
-
 		// the order is very important!
 		<-donePreprocessFiles // finish read data and send command
 		<-doneSendOutput      // finish send output
 		<-doneOutput          // finish print output
+		if config.Continue {
+			<-doneSaveSuccCmd
+		}
 
 		close(chExitSignalMonitor)
 		<-cleanupDone
@@ -279,8 +332,13 @@ func init() {
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
 	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on first error(s)")
-	// RootCmd.Flags().BoolP("continue", "c", false, `continue run commands except for finished commands in "finished.txt"`)
 	RootCmd.Flags().BoolP("dry-run", "", false, "print command but not run")
+
+	RootCmd.Flags().BoolP("continue", "c", false, `continue jobs.`+
+		` NOTES: 1) successful commands is saved in file (given by flag --succ-cmd-file);`+
+		` 2) if the file does not exists, rush saves data so we can continue jobs next time;`+
+		` 3) if the file exists, rush ignores jobs in it`)
+	RootCmd.Flags().StringP("succ-cmd-file", "", "successful_cmds.rush", `file for saving successful commands`)
 
 	// RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of a command before saving to tmpfile (unit: Mb)")
 
@@ -360,10 +418,10 @@ type Config struct {
 
 	KeepOrder bool
 	StopOnErr bool
-	Continue  bool
 	DryRun    bool
 
-	// BufferSize int
+	Continue    bool
+	SuccCmdFile string
 
 	AssignMap map[string]string
 	Trim      string
@@ -419,10 +477,10 @@ func getConfigs(cmd *cobra.Command) Config {
 
 		KeepOrder: getFlagBool(cmd, "keep-order"),
 		StopOnErr: getFlagBool(cmd, "stop-on-error"),
-		// Continue:  getFlagBool(cmd, "continue"),
-		DryRun: getFlagBool(cmd, "dry-run"),
+		DryRun:    getFlagBool(cmd, "dry-run"),
 
-		// BufferSize: getFlagPositiveInt(cmd, "buffer-size") * 1048576,
+		Continue:    getFlagBool(cmd, "continue"),
+		SuccCmdFile: getFlagString(cmd, "succ-cmd-file"),
 
 		Trim:      trim,
 		AssignMap: assignMap,

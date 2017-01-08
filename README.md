@@ -39,7 +39,7 @@ Major:
 - [x] keep output order, may use temporary file
 - [x] support timeout and retry
 - [x] support exit on fist error(s)
-- [ ] support continue,
+- [x] support continue,
   save status after [capturing ctrl+c](https://nathanleclaire.com/blog/2014/08/24/handling-ctrl-c-interrupt-signal-in-golang-programs/)
 - [x] Replacement strings (like GNU parallel):
     - [x] `{#}`, job ID
