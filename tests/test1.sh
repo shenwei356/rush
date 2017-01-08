@@ -37,15 +37,16 @@ fn_check_many_output() {
 run check_many_output fn_check_many_output
 assert_no_stderr
 assert_equal $(cat $STDOUT_FILE | wc -l) 10000000
+cat $STDOUT_FILE  | perl -ne 'next if /[\d\n]+/; print "->$_";'
+exit
 
 # lots of output + keep order
-fn_check_many_output() {
+fn_check_many_output_keep_order() {
     seq 1 10 | $app 'seq 1000000' -k
 }
-run check_many_output fn_check_many_output
+run fn_check_many_output_keep_order fn_check_many_output_keep_order
 assert_no_stderr
 assert_equal $(cat $STDOUT_FILE | wc -l) 10000000
-
 
 # keep order + -n
 fn_check_keep_order() {

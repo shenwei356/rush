@@ -165,6 +165,15 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         var: b, data: 2
         var: b, data: 3
 
+        $ seq 2 | ./rush ' seq 3 | awk -v s={} "{print \"source: \" s \", data: \" \$1}" '
+        source: 1, data: 1
+        source: 1, data: 2
+        source: 1, data: 3
+        source: 2, data: 1
+        source: 2, data: 2
+        source: 2, data: 3
+
+
 ## Usage
 
 ```

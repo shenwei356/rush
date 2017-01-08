@@ -64,11 +64,10 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 
 		if chars == "" {
 			target = fieldsStr
+		} else if !reCharsCheck.MatchString(chars) {
+			// checkError(fmt.Errorf("illegal placeholder: {%s}", chars))
+			target = fmt.Sprintf("{%s}", chars)
 		} else {
-			if !reCharsCheck.MatchString(chars) {
-				checkError(fmt.Errorf("illegal placeholder: {%s}", chars))
-			}
-
 			if v, ok := config.AssignMap[chars]; ok { // key-value
 				target = v
 			} else {

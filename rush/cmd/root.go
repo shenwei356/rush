@@ -247,7 +247,6 @@ Source code: https://github.com/shenwei356/rush
 			last := time.Now().Add(2 * time.Second)
 			for c := range chOutput {
 				outfh.WriteString(c)
-
 				if t := time.Now(); t.After(last) {
 					outfh.Flush()
 					last = t.Add(2 * time.Second)

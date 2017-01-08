@@ -59,6 +59,8 @@ type Command struct {
 
 	Err      error         // Error
 	Duration time.Duration // runtime
+
+	dryrun bool
 }
 
 // NewCommand create a Command
@@ -92,6 +94,13 @@ var OutputChunkSize = 16384 // 16K
 func (c *Command) Run() error {
 	c.Ch = make(chan string, runtime.NumCPU())
 
+	if c.dryrun {
+		c.Ch <- c.Cmd + "\n"
+		close(c.Ch)
+		c.finishSendOutput = true
+		return nil
+	}
+
 	c.Err = c.run()
 	if c.Err != nil {
 		return c.Err
@@ -108,17 +117,21 @@ func (c *Command) Run() error {
 
 		buf := make([]byte, OutputChunkSize)
 		var n int
+		// var N int
 		for {
 			n, c.Err = c.reader.Read(buf)
 			if c.Err != nil {
 				if c.Err == io.EOF || n < OutputChunkSize {
 					c.Ch <- string(buf[0:n])
+					// N += n
 					c.Err = nil
 				}
 				break
 			}
 			c.Ch <- string(buf[0:n])
+			// N += n
 		}
+		// fmt.Fprintf(os.Stderr, "sent %d\n", N)
 
 		// if Verbose {
 		// 	log.Infof("finish reading data from: %s", c.Cmd)
@@ -385,7 +398,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 		var wg sync.WaitGroup
 		if !opts.KeepOrder { // do not keep order
 			tokens := make(chan int, opts.Jobs)
-			var line string
+			var msg string
 
 		RECEIVECMD:
 			for c := range chCmd {
@@ -407,20 +420,14 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 						<-tokens
 					}()
 
-					// output the command name
-					if opts.DryRun {
-						chOut <- c.Cmd + "\n"
-						// if Verbose {
-						// 	log.Infof("finish sending cmd name: %s", c.Cmd)
-						// }
-						return
-					}
-
 					// read data from channel and outpput
+					// var N int
 				LOOP:
 					for {
 						select {
-						case chOut <- <-c.Ch:
+						case msg = <-c.Ch:
+							// N += len(msg)
+							chOut <- msg
 						// case <-cancel:
 						// 	// if Verbose {
 						// 	// 	log.Debugf("cancel receiving output from cmd #%d: %s", c.ID, c.Cmd)
@@ -431,14 +438,15 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 
 						if c.finishSendOutput {
 							// do not forget the left data
-							for line = range c.Ch {
-								chOut <- line
+							for msg = range c.Ch {
+								// N += len(msg)
+								chOut <- msg
 							}
 							checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd #%d: %s", c.ID, c.Cmd))
 							break LOOP
 						}
 					}
-
+					// fmt.Fprintf(os.Stderr, "receive %d\n", N)
 					// if Verbose {
 					// 	log.Infof("finish receiving data from: %s", c.Cmd)
 					// }
@@ -451,7 +459,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 			var id uint64 = 1
 			var c, c1 *Command
 			var ok bool
-			var line string
+			var msg string
 			cmds := make(map[uint64]*Command)
 		RECEIVECMD2:
 			for c = range chCmd {
@@ -465,27 +473,19 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 				}
 
 				if c.ID == id { // your turn
-					if opts.DryRun {
-						chOut <- c.Cmd + "\n"
-					} else {
-						for line = range c.Ch {
-							chOut <- line
-						}
-						checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
+					for msg = range c.Ch {
+						chOut <- msg
 					}
+					checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
 
 					id++
 				} else { // wait the ID come out
 					for true {
 						if c1, ok = cmds[id]; ok {
-							if opts.DryRun {
-								chOut <- c1.Cmd + "\n"
-							} else {
-								for line = range c1.Ch {
-									chOut <- line
-								}
-								checkError(errors.Wrapf(c1.Cleanup(), "remove tmpfile for cmd: %s", c1.Cmd))
+							for msg = range c1.Ch {
+								chOut <- msg
 							}
+							checkError(errors.Wrapf(c1.Cleanup(), "remove tmpfile for cmd: %s", c1.Cmd))
 
 							delete(cmds, c1.ID)
 							id++
@@ -506,14 +506,10 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 				sort.Sort(ids)
 				for _, id = range ids {
 					c := cmds[id]
-					if opts.DryRun {
-						chOut <- c.Cmd + "\n"
-					} else {
-						for line = range c.Ch {
-							chOut <- line
-						}
-						checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
+					for msg = range c.Ch {
+						chOut <- msg
 					}
+					checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
 				}
 			}
 
@@ -578,6 +574,10 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 				}()
 
 				command := NewCommand(id, cmdStr, cancel, opts.Timeout)
+
+				if opts.DryRun {
+					command.dryrun = true
+				}
 
 				chances := opts.Retries
 				for {
