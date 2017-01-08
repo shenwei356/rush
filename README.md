@@ -1,4 +1,3 @@
-
 # rush
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/shenwei356/rush)](https://goreportcard.com/report/github.com/shenwei356/rush)
@@ -56,7 +55,6 @@ Major:
   settable records sending to every command (`-n`, default `1`),
   and field delimiter (`-d`, default `\s+`).
 - [x] keep output order, may use temporary file
-- [ ] appropriate quoting
 
 Minor:
 
@@ -175,17 +173,17 @@ See on [release page](https://github.com/shenwei356/rush/releases).
 
 1. Interrupt jobs by `Ctrl + C`, rush will stopping unfinished commands and exit.
 
-    $ seq 1 20 | rush 'sleep 1; echo {}'
-    ^C[CRIT] received an interrupt, stopping unfinished commands...
-    [ERRO] wait cmd #7: sleep 1; echo 7: signal: interrupt
-    [ERRO] wait cmd #5: sleep 1; echo 5: signal: killed
-    [ERRO] wait cmd #6: sleep 1; echo 6: signal: killed
-    [ERRO] wait cmd #8: sleep 1; echo 8: signal: killed
-    [ERRO] wait cmd #9: sleep 1; echo 9: signal: killed
-    1
-    3
-    4
-    2
+        $ seq 1 20 | rush 'sleep 1; echo {}'
+        ^C[CRIT] received an interrupt, stopping unfinished commands...
+        [ERRO] wait cmd #7: sleep 1; echo 7: signal: interrupt
+        [ERRO] wait cmd #5: sleep 1; echo 5: signal: killed
+        [ERRO] wait cmd #6: sleep 1; echo 6: signal: killed
+        [ERRO] wait cmd #8: sleep 1; echo 8: signal: killed
+        [ERRO] wait cmd #9: sleep 1; echo 9: signal: killed
+        1
+        3
+        4
+        2
 
 1. Continue/resume jobs (`-c`). When some jobs failed (by execution failure, timeout,
     or cancelling by user with `Ctrl + C`),
