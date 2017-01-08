@@ -135,7 +135,7 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         3
         5
 
-1. Custom record delimiter (`-D`)
+1. Custom record delimiter (`-D`), note that empty records are not used.
 
         $ echo -ne ">seq1\nactg\n>seq2\nAAAA\n>seq3\nCCCC"
         >seq1
@@ -146,9 +146,9 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         CCCC
 
         $ echo -ne ">seq1\nactg\n>seq2\nAAAA\n>seq3\nCCCC" | rush -D ">" 'echo FASTA record {#}: name: {1} sequence: {2}' -k -d "\n"
-        FASTA record 2: name: seq1 sequence: actg
-        FASTA record 3: name: seq2 sequence: AAAA
-        FASTA record 4: name: seq3 sequence: CCCC
+        FASTA record 1: name: seq1 sequence: actg
+        FASTA record 2: name: seq2 sequence: AAAA
+        FASTA record 3: name: seq3 sequence: CCCC
 
 1. Assign value to variable, like `awk -v` (`-v`)
 
@@ -173,13 +173,47 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         source: 2, data: 2
         source: 2, data: 3
 
+1. Interrupt jobs by `Ctrl + C`, rush will stopping unfinished commands and exit.
+
+    $ seq 1 20 | rush 'sleep 1; echo {}'
+    ^C[CRIT] received an interrupt, stopping unfinished commands...
+    [ERRO] wait cmd #7: sleep 1; echo 7: signal: interrupt
+    [ERRO] wait cmd #5: sleep 1; echo 5: signal: killed
+    [ERRO] wait cmd #6: sleep 1; echo 6: signal: killed
+    [ERRO] wait cmd #8: sleep 1; echo 8: signal: killed
+    [ERRO] wait cmd #9: sleep 1; echo 9: signal: killed
+    1
+    3
+    4
+    2
+
+1. Continue/resume jobs (`-c`). When some jobs failed (by execution failure, timeout,
+    or cancelling by user with `Ctrl + C`),
+    Please switch flag `-c/--continue` on and run again,
+    so that `rush` can save successful commands and ignore them in **NEXT** run.
+
+        $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
+        [ERRO] run cmd #2: sleep 2; echo 2: time out
+        [ERRO] run cmd #3: sleep 3; echo 3: time out
+        1
+
+        # successful commands:
+        $ cat successful_cmds.rush
+        sleep 1; echo 1
+
+        # run again
+        $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
+        [INFO] ignore cmd #1: sleep 1; echo 1
+        [ERRO] run cmd #1: sleep 2; echo 2: time out
+        [ERRO] run cmd #2: sleep 3; echo 3: time out
+
 
 ## Usage
 
 ```
 rush -- parallelly execute shell commands
 
-Version: 0.0.4
+Version: 0.0.5
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -212,10 +246,17 @@ Examples:
   9. assign value to variable, like "awk -v"
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
+  10. save successful commands to continue in NEXT run
+      $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
+      [INFO] ignore cmd #1: sleep 1; echo 1
+      [ERRO] run cmd #1: sleep 2; echo 2: time out
+      [ERRO] run cmd #2: sleep 3; echo 3: time out
+
   More examples: https://github.com/shenwei356/rush
 
 Flags:
   -v, --assign stringSlice        assign the value val to the variable var (format: var=val)
+  -c, --continue                  continue jobs. NOTES: 1) successful commands is saved in file (given by flag --succ-cmd-file); 2) if the file does not exists, rush saves data so we can continue jobs next time; 3) if the file exists, rush ignores jobs in it
       --dry-run                   print command but not run
   -d, --field-delimiter string    field delimiter in records, support regular expression (default "\s+")
   -i, --infile stringSlice        input data file, multi-values supported
@@ -228,6 +269,7 @@ Flags:
   -r, --retries int               maximum retries (default 0)
       --retry-interval int        retry interval (unit: second) (default 0)
   -e, --stop-on-error             stop all processes on first error(s)
+      --succ-cmd-file string      file for saving successful commands (default "successful_cmds.rush")
   -t, --timeout int               timeout of a command (unit: second, 0 for no timeout) (default 0)
       --trim string               trim white space in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)
       --verbose                   print verbose information

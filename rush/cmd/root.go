@@ -367,6 +367,12 @@ func init() {
   9. assign value to variable, like "awk -v"
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
+  10. save successful commands to continue in NEXT run
+      $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
+      [INFO] ignore cmd #1: sleep 1; echo 1
+      [ERRO] run cmd #1: sleep 2; echo 2: time out
+      [ERRO] run cmd #2: sleep 3; echo 3: time out
+
   More examples: https://github.com/shenwei356/rush`
 
 	RootCmd.SetUsageTemplate(`Usage:{{if .Runnable}}
