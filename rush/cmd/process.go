@@ -246,8 +246,10 @@ func (c *Command) run() error {
 	go func() {
 		select {
 		case <-c.Cancel:
+			if Verbose {
+				log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
+			}
 			chErr <- ErrCancelled
-			log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
 			command.Process.Kill()
 		case <-chCancelMonitor:
 			// default:  // must not use default, if you must use, use for loop
@@ -384,11 +386,14 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 			tokens := make(chan int, opts.Jobs)
 			var line string
 
+		RECEIVECMD:
 			for c := range chCmd {
 				select {
 				case <-cancel:
-					// log.Debugf("cancel receiving cmd from chCmd")
-					break
+					if Verbose {
+						log.Debugf("cancel receiving finished cmd")
+					}
+					break RECEIVECMD
 				default: // needed
 				}
 
@@ -415,9 +420,11 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 					for {
 						select {
 						case chOut <- <-c.Ch:
-						case <-cancel:
-							// log.Debugf("cancel receiving output from cmd")
-							break LOOP
+						// case <-cancel:
+						// 	// if Verbose {
+						// 	// 	log.Debugf("cancel receiving output from cmd #%d: %s", c.ID, c.Cmd)
+						// 	// }
+						// 	break LOOP
 						default: // needed
 						}
 
@@ -445,11 +452,14 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 			var ok bool
 			var line string
 			cmds := make(map[uint64]*Command)
+		RECEIVECMD2:
 			for c = range chCmd {
 				select {
 				case <-cancel:
-					// log.Debugf("cancel receiving cmd from chCmd")
-					break
+					if Verbose {
+						log.Debugf("cancel receiving finished cmd")
+					}
+					break RECEIVECMD2
 				default: // needed
 				}
 
@@ -537,12 +547,14 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		tokens := make(chan int, opts.Jobs)
 		var id uint64 = 1
 		var stop bool
-	FLAG:
+	RECEIVECMD:
 		for cmdStr := range chCmdStr {
 			select {
 			case <-cancel:
-				// log.Debugf("cancel receiving cmdStr from chCmdStr")
-				break FLAG
+				if Verbose {
+					log.Debugf("cancel receiving commands")
+				}
+				break RECEIVECMD
 			default: // needed
 			}
 

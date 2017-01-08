@@ -127,24 +127,25 @@ Source code: https://github.com/shenwei356/rush
 
 		cancel := make(chan struct{})
 
-		donePreprocess := make(chan int)
+		donePreprocessFiles := make(chan int)
 
 		// channel of command
 		chCmdStr := make(chan string, config.Jobs)
 
-		for _, file := range config.Infiles {
-			// input file handler
-			var infh *os.File
-			if isStdin(file) {
-				infh = os.Stdin
-			} else {
-				infh, err = os.Open(file)
-				checkError(err)
-				defer infh.Close()
-			}
+		// read data and generate command
+		go func() {
+		READFILES:
+			for _, file := range config.Infiles {
+				// input file handler
+				var infh *os.File
+				if isStdin(file) {
+					infh = os.Stdin
+				} else {
+					infh, err = os.Open(file)
+					checkError(err)
+					defer infh.Close()
+				}
 
-			// read data and generate command
-			go func() {
 				scanner := bufio.NewScanner(infh)
 				// 2147483647: max int32
 				scanner.Buffer(make([]byte, 0, 16384), 2147483647)
@@ -156,11 +157,14 @@ Source code: https://github.com/shenwei356/rush
 				var record string
 				var records []string
 				records = make([]string, 0, n)
+
 				for scanner.Scan() {
 					select {
 					case <-cancel:
-						log.Debugf("cancel sending data")
-						break
+						if config.Verbose {
+							log.Warningf("cancel reading file: %s", file)
+						}
+						break READFILES
 					default:
 					}
 
@@ -182,16 +186,14 @@ Source code: https://github.com/shenwei356/rush
 				}
 
 				checkError(errors.Wrap(scanner.Err(), "read input data"))
+			}
 
-				close(chCmdStr)
-
-				// if Verbose {
-				// 	log.Infof("finish reading input data")
-				// }
-				donePreprocess <- 1
-			}()
-
-		}
+			close(chCmdStr)
+			// if Verbose {
+			// 	log.Infof("finish reading input data")
+			// }
+			donePreprocessFiles <- 1
+		}()
 		// ---------------------------------------------------------------
 
 		// run
@@ -218,26 +220,25 @@ Source code: https://github.com/shenwei356/rush
 
 		chExitSignalMonitor := make(chan struct{})
 		signalChan := make(chan os.Signal, 1)
-		cleanupDone := make(chan bool)
+		cleanupDone := make(chan int)
 		signal.Notify(signalChan, os.Interrupt)
 		go func() {
 			select {
 			case <-signalChan:
 				log.Criticalf("received an interrupt, stopping commands..")
 				close(cancel)
-				cleanupDone <- true
-				outfh.Flush()
+				cleanupDone <- 1
 				return
 			case <-chExitSignalMonitor:
-				cleanupDone <- true
+				cleanupDone <- 1
 				return
 			}
 		}()
 
 		// the order is very important!
-		<-donePreprocess // finish read data and send command
-		<-doneSendOutput // finish send output
-		<-doneOutput     // finish print output
+		<-donePreprocessFiles // finish read data and send command
+		<-doneSendOutput      // finish send output
+		<-doneOutput          // finish print output
 
 		close(chExitSignalMonitor)
 		<-cleanupDone
