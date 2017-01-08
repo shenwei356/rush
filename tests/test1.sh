@@ -32,12 +32,12 @@ assert_equal $(cat $STDOUT_FILE | sort -k1,1n | paste -sd" " | sed 's/ //g') '12
 
 # lots of output
 fn_check_many_output() {
-    seq 1 10 | $app 'seq 1000000'
+    seq 1 10 | $app 'for f in $(seq 1000000); do echo from: {}; done'
 }
+echo this test takes about 40 seconds, please wait
 run check_many_output fn_check_many_output
 assert_no_stderr
 assert_equal $(cat $STDOUT_FILE | wc -l) 10000000
-cat $STDOUT_FILE  | perl -ne 'next if /[\d\n]+/; print "->$_";'
 exit
 
 # lots of output + keep order
