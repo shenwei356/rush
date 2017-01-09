@@ -4,7 +4,7 @@
 [![Latest Version](https://img.shields.io/github/release/shenwei356/rush.svg?style=flat?maxAge=86400)](https://github.com/shenwei356/rush/releases)
 [![Github Releases](https://img.shields.io/github/downloads/shenwei356/rush/latest/total.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases)
 
-`rush` -- parallelly execute shell commands.
+`rush` -- parallelly execute shell commands. A GNU parallel like tool in Go.
 
 `rush` is a tool similar to [GNU parallel](https://www.gnu.org/software/parallel/)
  and [gargs](https://github.com/brentp/gargs).
@@ -219,7 +219,7 @@ See on [release page](https://github.com/shenwei356/rush/releases).
    so `wget` does not work). Here I set max jobs number (`-j`) as `20`,
    each job has a max running time (`-t`) of `60` seconds and `3` retry changes
    (`-r`). Continue flag `-c` is also switched on, so we can continue unfinished
-   jobs. Luckly, it's accomplished in one run :smile:
+   jobs. Luckily, it's accomplished in one run :smile:
 
         $ for f in $(seq 2014 2016); do \
         $    /bin/rm -rf $f; mkdir -p $f; \
