@@ -32,36 +32,40 @@
 
 Major:
 
-- [x] **support timeout and retry**
-- [x] **support continue**
-- [x] **safe exit when [capturing ctrl+c](https://nathanleclaire.com/blog/2014/08/24/handling-ctrl-c-interrupt-signal-in-golang-programs/)**
-- [x] support exit on fist error(s)
-- [x] **`awk -v` like custom defined variables**
-- [x] **practical replacement strings** (like GNU parallel):
+- [x] **Avoid mixed line from multiple processes without loss of performance**,
+  e.g. the first half of a line is from one process
+  and the last half of the line is from another process.
+  similar with `parallel --line-buffer`
+- [x] **Timeout** (`-t`)
+- [x] **Retry** (`-r`)
+- [x] **Safe exit after [capturing Ctrl+C](https://nathanleclaire.com/blog/2014/08/24/handling-ctrl-c-interrupt-signal-in-golang-programs/)**
+- [x] **Continue** (`-c`)
+- [x] **`awk -v` like custom defined variables** (`-v`)
+- [x] **Keeping output in order of input** (`-k`)
+- [x] **Practical replacement strings** (like GNU parallel):
     - [x] `{#}`, job ID
     - [x] `{}`, full data
-    - [x] support positional replacement strings: `{n}`
+    - [x] Positional replacement strings: `{n}`
         - [x] `n`th field in delimiter-delimited data
         - [ ] `n`th matche of regular expression
-    - [x] direcotry and file
+    - [x] Direcotry and file
         - [x] `{/}`, dirname  (`{//}` in GNU parallel)
         - [x] `{%}`, basename (`{/}` in GNU parallel)
         - [x] `{.}`, remove the last extension
         - [x] `{:}`, remove any extension (GNU parallel does not have)
-    - [x] combinations:
+    - [x] Combinations:
         - [x] `{%.}`, `{%:}`, basename without extension
         - [x] `{n.}`, `{n/}`, manipulate nth field
-- [x] **custom record delimiter** (`-D`, default `\n`),
-  settable records sending to every command (`-n`, default `1`),
-  and field delimiter (`-d`, default `\s+`).
-- [x] keep output order, may use temporary file
+- [x] **Custom record delimiter** (`-D`, default `\n`),
+  settable **records sending to every command** (`-n`, default `1`),
+  and **field delimiter** (`-d`, default `\s+`).
+- [x] **Exit on fist error(s)** (`-e`)
 
 Minor:
 
-- [x] logging
-- [x] dry run
-- [x] trim arguments
-- [x] verbose
+- [x] Dry run (`--dry-run`)
+- [x] Trim input data (`--trim`)
+- [x] Verbose output (`--verbose`)
 
 ## Performance
 
@@ -228,7 +232,7 @@ See on [release page](https://github.com/shenwei356/rush/releases).
 ```
 rush -- parallelly execute shell commands
 
-Version: 0.0.5
+Version: 0.0.6
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -323,23 +327,23 @@ For Go developer, just one command:
 
 ## Download
 
-[rush v0.0.5](https://github.com/shenwei356/rush/releases/tag/v0.0.5)
-[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.0.5/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.0.5)
+[rush v0.0.6](https://github.com/shenwei356/rush/releases/tag/v0.0.6)
+[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.0.6/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.0.6)
 
 OS     |Arch      |File                                                                                                                          |Download Count
 :------|:---------|:-----------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_linux_386.tar.gz)                    |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_linux_386.tar.gz)
-Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_linux_amd64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_linux_amd64.tar.gz)
-OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_darwin_386.tar.gz)                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_darwin_386.tar.gz)
-OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_darwin_amd64.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_darwin_amd64.tar.gz)
-Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_windows_386.exe.tar.gz)        |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_windows_386.exe.tar.gz)
-Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_windows_amd64.exe.tar.gz)|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.5/rush_windows_amd64.exe.tar.gz)
+Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_linux_386.tar.gz)                    |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_linux_386.tar.gz)
+Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_linux_amd64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_linux_amd64.tar.gz)
+OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_darwin_386.tar.gz)                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_darwin_386.tar.gz)
+OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_darwin_amd64.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_darwin_amd64.tar.gz)
+Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_windows_386.exe.tar.gz)        |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_windows_386.exe.tar.gz)
+Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_windows_amd64.exe.tar.gz)|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.0.6/rush_windows_amd64.exe.tar.gz)
 
 ## Acknowledgements
 
 Specially thank [@brentp](https://github.com/brentp)
 and his [gargs](https://github.com/brentp/gargs), from which `rush` borrows
-lots of ideas.
+some ideas.
 
 ## Contact
 

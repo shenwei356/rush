@@ -92,7 +92,7 @@ var OutputChunkSize = 16384 // 16K
 
 // Run runs a command and send output to command.Ch in background.
 func (c *Command) Run() error {
-	c.Ch = make(chan string, runtime.NumCPU())
+	c.Ch = make(chan string, 1)
 
 	if c.dryrun {
 		c.Ch <- c.Cmd + "\n"
@@ -117,21 +117,55 @@ func (c *Command) Run() error {
 
 		buf := make([]byte, OutputChunkSize)
 		var n int
-		// var N int
+		var i int
+		var b bytes.Buffer
+		var bb []byte
+		var existedN int
+		// var N uint64
 		for {
 			n, c.Err = c.reader.Read(buf)
+
+			existedN = b.Len()
+			b.Write(buf[0:n])
+
 			if c.Err != nil {
-				if c.Err == io.EOF || n < OutputChunkSize {
-					c.Ch <- string(buf[0:n])
-					// N += n
+				if c.Err == io.EOF {
+					if b.Len() > 0 {
+						// if Verbose {
+						// 	N += uint64(b.Len())
+						// }
+						c.Ch <- b.String() // string(buf[0:n])
+					}
+					b.Reset()
 					c.Err = nil
 				}
 				break
 			}
-			c.Ch <- string(buf[0:n])
+
+			bb = b.Bytes()
+			i = bytes.LastIndexByte(bb, '\n')
+			if i < 0 {
+				continue
+			}
+
+			// if Verbose {
+			// 	N += uint64(len(bb[0 : i+1]))
+			// }
+			c.Ch <- string(bb[0 : i+1]) // string(buf[0:n])
+
+			b.Reset()
+			if i-existedN+1 < n {
+				// ------    ======i========n
+				// existed   buf
+				//   5          4      6
+				b.Write(buf[i-existedN+1 : n])
+			}
 			// N += n
 		}
-		// fmt.Fprintf(os.Stderr, "sent %d\n", N)
+
+		// if Verbose {
+		// 	log.Debugf("cmd #%d sent %d bytes\n", c.ID, N)
+		// }
 
 		// if Verbose {
 		// 	log.Infof("finish reading data from: %s", c.Cmd)
@@ -396,9 +430,9 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 
 	go func() {
 		var wg sync.WaitGroup
+
 		if !opts.KeepOrder { // do not keep order
 			tokens := make(chan int, opts.Jobs)
-			var msg string
 
 		RECEIVECMD:
 			for c := range chCmd {
@@ -421,32 +455,18 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 					}()
 
 					// read data from channel and outpput
-					// var N int
-				LOOP:
-					for {
-						select {
-						case msg = <-c.Ch:
-							// N += len(msg)
-							chOut <- msg
-						// case <-cancel:
-						// 	// if Verbose {
-						// 	// 	log.Debugf("cancel receiving output from cmd #%d: %s", c.ID, c.Cmd)
-						// 	// }
-						// 	break LOOP
-						default: // needed
-						}
-
-						if c.finishSendOutput {
-							// do not forget the left data
-							for msg = range c.Ch {
-								// N += len(msg)
-								chOut <- msg
-							}
-							checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd #%d: %s", c.ID, c.Cmd))
-							break LOOP
-						}
+					// var N uint64
+					for msg := range c.Ch {
+						// if Verbose {
+						// 	N += uint64(len(msg))
+						// }
+						chOut <- msg
 					}
-					// fmt.Fprintf(os.Stderr, "receive %d\n", N)
+					checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd #%d: %s", c.ID, c.Cmd))
+
+					// if Verbose {
+					// 	log.Debugf("receive %d bytes from cmd #%d\n", N, c.ID)
+					// }
 					// if Verbose {
 					// 	log.Infof("finish receiving data from: %s", c.Cmd)
 					// }
@@ -459,7 +479,6 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 			var id uint64 = 1
 			var c, c1 *Command
 			var ok bool
-			var msg string
 			cmds := make(map[uint64]*Command)
 		RECEIVECMD2:
 			for c = range chCmd {
@@ -473,7 +492,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 				}
 
 				if c.ID == id { // your turn
-					for msg = range c.Ch {
+					for msg := range c.Ch {
 						chOut <- msg
 					}
 					checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
@@ -482,7 +501,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 				} else { // wait the ID come out
 					for true {
 						if c1, ok = cmds[id]; ok {
-							for msg = range c1.Ch {
+							for msg := range c1.Ch {
 								chOut <- msg
 							}
 							checkError(errors.Wrapf(c1.Cleanup(), "remove tmpfile for cmd: %s", c1.Cmd))
@@ -506,7 +525,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 				sort.Sort(ids)
 				for _, id = range ids {
 					c := cmds[id]
-					for msg = range c.Ch {
+					for msg := range c.Ch {
 						chOut <- msg
 					}
 					checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
