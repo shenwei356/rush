@@ -321,7 +321,7 @@ func init() {
 
 	RootCmd.Flags().StringSliceP("infile", "i", []string{}, "input data file, multi-values supported")
 
-	RootCmd.Flags().StringP("record-delimiter", "D", "\n", `record delimiter, supports regular expression (default is "\n")`)
+	RootCmd.Flags().StringP("record-delimiter", "D", "\n", `record delimiter (default is "\n")`)
 	RootCmd.Flags().IntP("nrecords", "n", 1, "number of records sent to a command")
 	RootCmd.Flags().StringP("field-delimiter", "d", `\s+`, "field delimiter in records, support regular expression")
 

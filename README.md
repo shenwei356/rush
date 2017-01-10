@@ -283,7 +283,7 @@ Flags:
   -k, --keep-order                keep output in order of input
   -n, --nrecords int              number of records sent to a command (default 1)
   -o, --out-file string           out file ("-" for stdout) (default "-")
-  -D, --record-delimiter string   record delimiter, supports regular expression (default is "\n") (default "
+  -D, --record-delimiter string   record delimiter (default is "\n") (default "
 ")
   -r, --retries int               maximum retries (default 0)
       --retry-interval int        retry interval (unit: second) (default 0)
