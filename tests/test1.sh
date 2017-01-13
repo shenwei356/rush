@@ -28,7 +28,7 @@ fn_check_keep_order() {
 }
 run keep_order fn_check_keep_order
 assert_no_stderr
-assert_equal $(cat $STDOUT_FILE | sort -k1,1n | paste -s -d '' - | sed 's/ //g') '12345678910'
+assert_equal $(cat $STDOUT_FILE | sort -k1,1n | paste -s -d " " - | sed 's/ //g') '1 2 3 4 5 6 7 8 9 10'
 
 # lots of output
 fn_check_many_output() {
@@ -52,7 +52,7 @@ fn_check_keep_order() {
 }
 run keep_order_n fn_check_keep_order
 assert_no_stderr
-assert_equal $(cat $STDOUT_FILE | sort -k1,1n | paste -s -d '' - | sed 's/ //g') '13579'
+assert_equal $(cat $STDOUT_FILE | sort -k1,1n | paste -s -d " " - | sed 's/ //g') '1 3 5 7 9'
 
 # -------------------------------------------------
 
