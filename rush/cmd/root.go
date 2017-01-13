@@ -69,7 +69,7 @@ Source code: https://github.com/shenwei356/rush
 
 		command0 := strings.Join(args, " ")
 		if command0 == "" {
-			command0 = "echo {}"
+			command0 = `echo "{}"`
 		}
 
 		// -----------------------------------------------------------------
@@ -322,6 +322,7 @@ func init() {
 	RootCmd.Flags().StringSliceP("infile", "i", []string{}, "input data file, multi-values supported")
 
 	RootCmd.Flags().StringP("record-delimiter", "D", "\n", `record delimiter (default is "\n")`)
+	RootCmd.Flags().StringP("records-join-sep", "J", "\n", `record separator for joining multi-records (default is "\n")`)
 	RootCmd.Flags().IntP("nrecords", "n", 1, "number of records sent to a command")
 	RootCmd.Flags().StringP("field-delimiter", "d", `\s+`, "field delimiter in records, support regular expression")
 
@@ -412,10 +413,11 @@ type Config struct {
 
 	Infiles []string
 
-	RecordDelimiter  string
-	NRecords         int
-	FieldDelimiter   string
-	reFieldDelimiter *regexp.Regexp
+	RecordDelimiter      string
+	RecordsJoinSeparator string
+	NRecords             int
+	FieldDelimiter       string
+	reFieldDelimiter     *regexp.Regexp
 
 	Retries       int
 	RetryInterval int
@@ -472,9 +474,10 @@ func getConfigs(cmd *cobra.Command) Config {
 
 		Infiles: getFlagStringSlice(cmd, "infile"),
 
-		RecordDelimiter: getFlagString(cmd, "record-delimiter"),
-		NRecords:        getFlagPositiveInt(cmd, "nrecords"),
-		FieldDelimiter:  getFlagString(cmd, "field-delimiter"),
+		RecordDelimiter:      getFlagString(cmd, "record-delimiter"),
+		RecordsJoinSeparator: getFlagString(cmd, "records-join-sep"),
+		NRecords:             getFlagPositiveInt(cmd, "nrecords"),
+		FieldDelimiter:       getFlagString(cmd, "field-delimiter"),
 
 		Retries:       getFlagNonNegativeInt(cmd, "retries"),
 		RetryInterval: getFlagNonNegativeInt(cmd, "retry-interval"),

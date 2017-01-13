@@ -53,7 +53,7 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 		}
 	}
 
-	fieldsStr := strings.Join(records, " ")
+	fieldsStr := strings.Join(records, config.RecordsJoinSeparator)
 
 	var fields []string
 
