@@ -353,15 +353,15 @@ func init() {
       $ seq 1 | rush 'sleep 2; echo {}' -t 1
   4. retry
       $ seq 1 | rush 'python script.py' -r 3
-  5. dirname & basename
-      $ echo dir/file.txt.gz | rush 'echo {/} {%}'
-      dir file.txt.gz
+  5. dirname & basename & remove suffix
+      $ echo dir/file_1.txt.gz | rush 'echo {/} {%} {^_1.txt.gz}'
+      dir file.txt.gz dir/file
   6. basename without last or any extension
       $ echo dir/file.txt.gz | rush 'echo {%.} {%:}'
       file.txt file
   7. job ID, combine fields and other replacement strings
-      $ echo 123 file.txt | rush 'echo job {#}: {2} {2.}'
-      job 1: file.txt file
+      $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
+      job 1: file.txt file s
   8. custom field delimiter
       $ echo a=b=c | rush 'echo {1} {2} {3}' -d =
       a b c

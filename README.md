@@ -111,10 +111,10 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         python: can't open file 'unexisted_script.py': [Errno 2] No such file or directory
         [ERRO] wait command: python unexisted_script.py: exit status 2
 
-1. Dirname (`{/}`) and basename (`{%}`)
+1. Dirname (`{/}`) and basename (`{%}`) and remove custom suffix (`{^suffix}`)
 
-        $ echo dir/file.txt.gz | rush 'echo {/} {%}'
-        dir file.txt.gz
+        $ echo dir/file_1.txt.gz | rush 'echo {/} {%} {^_1.txt.gz}'
+        dir file_1.txt.gz dir/file
 
 1. Get basename, and remove last (`{.}`) or any (`{:}`) extension
 
@@ -123,8 +123,8 @@ See on [release page](https://github.com/shenwei356/rush/releases).
 
 1. Job ID, combine fields index and other replacement strings
 
-        $ echo 123 file.txt | rush 'echo job {#}: {2} {2.}'
-        job 1: file.txt file
+        $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
+        job 1: file.txt file s
 
 1. Custom field delimiter (`-d`)
 
@@ -245,7 +245,7 @@ See on [release page](https://github.com/shenwei356/rush/releases).
 ```
 rush -- parallelly execute shell commands
 
-Version: 0.0.7
+Version: 0.0.8
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -263,15 +263,15 @@ Examples:
       $ seq 1 | rush 'sleep 2; echo {}' -t 1
   4. retry
       $ seq 1 | rush 'python script.py' -r 3
-  5. dirname & basename
-      $ echo dir/file.txt.gz | rush 'echo {/} {%}'
-      dir file.txt.gz
+  5. dirname & basename & remove suffix
+      $ echo dir/file_1.txt.gz | rush 'echo {/} {%} {^_1.txt.gz}'
+      dir file.txt.gz dir/file
   6. basename without last or any extension
       $ echo dir/file.txt.gz | rush 'echo {%.} {%:}'
       file.txt file
   7. job ID, combine fields and other replacement strings
-      $ echo 123 file.txt | rush 'echo job {#}: {2} {2.}'
-      job 1: file.txt file
+      $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
+      job 1: file.txt file s
   8. custom field delimiter
       $ echo a=b=c | rush 'echo {1} {2} {3}' -d =
       a b c

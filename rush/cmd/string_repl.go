@@ -31,7 +31,7 @@ import (
 
 var rePlaceHolder = regexp.MustCompile(`\{([^\}]*)\}`)
 var reChars = regexp.MustCompile(`\d+|.`)
-var reCharsCheck = regexp.MustCompile(`^(\d+)*[^\d]*$`)
+var reCharsCheck = regexp.MustCompile(`^(\d+)*.*$`)
 
 func fillCommand(config Config, command string, chunk Chunk) string {
 	founds := rePlaceHolder.FindAllStringSubmatchIndex(command, -1)
@@ -67,7 +67,6 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 		if chars == "" {
 			target = fieldsStr
 		} else if !reCharsCheck.MatchString(chars) {
-			// checkError(fmt.Errorf("illegal placeholder: {%s}", chars))
 			target = fmt.Sprintf("{%s}", chars)
 		} else {
 			if v, ok := config.AssignMap[chars]; ok { // key-value
@@ -97,26 +96,38 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 					i = 0
 				}
 
-				for _, char = range charsGroups[i:] {
+				var x, y int
+				var rmSuffix bool
+			LOOP:
+				for x, char = range charsGroups[i:] {
 					switch char {
 					case "#": // job number
 						target = fmt.Sprintf("%d", chunk.ID)
 					case ".": // remove last extension
-						i = strings.LastIndex(target, ".")
-						if i > 0 {
-							target = target[0:i]
+						x = strings.LastIndex(target, ".")
+						if x > 0 {
+							target = target[0:x]
 						}
-					case ":": //remove any extension
-						i = strings.Index(target, ".")
-						if i > 0 {
-							target = target[0:i]
+					case ":": // remove any extension
+						x = strings.Index(target, ".")
+						if x > 0 {
+							target = target[0:x]
 						}
-					case "/": //dirname
+					case "/": // dirname
 						target = filepath.Dir(target)
-					case "%":
+					case "%": // basename
 						target = filepath.Base(target)
+					case "^": // remove suffix
+						rmSuffix = true
+						break LOOP
 					default:
 						target = ""
+					}
+				}
+				if rmSuffix {
+					y = strings.LastIndex(target, strings.Join(charsGroups[i:][x+1:], ""))
+					if y >= 0 {
+						target = target[0:y]
 					}
 				}
 			}
