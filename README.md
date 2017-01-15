@@ -1,4 +1,4 @@
-w# rush
+# rush
 
 [![Build Status](https://travis-ci.org/shenwei356/rush.svg?branch=master)](https://travis-ci.org/shenwei356/rush)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shenwei356/rush)](https://goreportcard.com/report/github.com/shenwei356/rush)
