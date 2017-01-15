@@ -1,4 +1,4 @@
-# rush
+w# rush
 
 [![Build Status](https://travis-ci.org/shenwei356/rush.svg?branch=master)](https://travis-ci.org/shenwei356/rush)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shenwei356/rush)](https://goreportcard.com/report/github.com/shenwei356/rush)
@@ -12,9 +12,9 @@
  `rush` borrows some idea from them and has some unique features,
   e.g., more advanced embeded strings replacement than `parallel`.
 
+Table of Contents
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-
 
 - [Features](#features)
 - [Performance](#performance)
@@ -317,12 +317,14 @@ Flags:
  executable binary files **for most popular operating systems** are freely available
   in [release](https://github.com/shenwei356/rush/releases) page.
 
+#### Method 1: Download binaries
+
 Just [download](https://github.com/shenwei356/rush/releases) compressed
 executable file of your operating system,
-and uncompress it with `tar -zxvf xxx.tar.gz` command or other tools.
+and decompress it with `tar -zxvf *.tar.gz` command or other tools.
 And then:
 
-1. For Unix-like systems
+1. **For Linux-like systems**
     1. If you have root privilege simply copy it to `/usr/local/bin`:
 
             sudo cp rush /usr/local/bin/
@@ -330,15 +332,15 @@ And then:
     1. Or add the current directory of the executable file to environment variable
     `PATH`:
 
-            echo export PATH=\"$(pwd)\":\$PATH >> ~/.bashrc
+            echo export PATH=\$PATH:\"$(pwd)\" >> ~/.bashrc
             source ~/.bashrc
 
-1. For windows, just copy `rush.exe` to `C:\WINDOWS\system32`.
 
-For Go developer, just one command:
+1. **For windows**, just copy `rush.exe` to `C:\WINDOWS\system32`.
+
+#### Method 2: For Go developer
 
     go get -u github.com/shenwei356/rush/rush
-
 
 ## Download
 
