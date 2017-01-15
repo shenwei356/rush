@@ -12,7 +12,7 @@ w# rush
  `rush` borrows some idea from them and has some unique features,
   e.g., more advanced embeded strings replacement than `parallel`.
 
-Table of Contents
+## Table of Contents
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
