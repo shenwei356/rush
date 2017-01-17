@@ -118,8 +118,8 @@ See on [release page](https://github.com/shenwei356/rush/releases).
 
 1. Get basename, and remove last (`{.}`) or any (`{:}`) extension
 
-        $ echo dir/file.txt.gz | rush 'echo {%.} {%:}'
-        file.txt file
+        $ echo dir.d/file.txt.gz | rush 'echo {.} {:} {%.} {%:}'
+        dir.d/file.txt dir.d/file file.txt file
 
 1. Job ID, combine fields index and other replacement strings
 
@@ -245,7 +245,7 @@ See on [release page](https://github.com/shenwei356/rush/releases).
 ```
 rush -- parallelly execute shell commands
 
-Version: 0.0.8
+Version: 0.0.9
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -267,8 +267,8 @@ Examples:
       $ echo dir/file_1.txt.gz | rush 'echo {/} {%} {^_1.txt.gz}'
       dir file.txt.gz dir/file
   6. basename without last or any extension
-      $ echo dir/file.txt.gz | rush 'echo {%.} {%:}'
-      file.txt file
+      $ echo dir.d/file.txt.gz | rush 'echo {.} {:} {%.} {%:}'
+      dir.d/file.txt dir.d/file file.txt file
   7. job ID, combine fields and other replacement strings
       $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
       job 1: file.txt file s

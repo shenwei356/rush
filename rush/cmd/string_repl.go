@@ -63,9 +63,12 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 	var buf bytes.Buffer
 	for _, found := range founds {
 		chars = command[found[2]:found[3]]
+		target = fieldsStr
 
 		if chars == "" {
 			target = fieldsStr
+		} else if chars == "#" {
+			target = fmt.Sprintf("%d", chunk.ID)
 		} else if !reCharsCheck.MatchString(chars) {
 			target = fmt.Sprintf("{%s}", chars)
 		} else {
@@ -98,21 +101,29 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 
 				var x, y int
 				var rmSuffix bool
+				var td, tb string
 			LOOP:
 				for x, char = range charsGroups[i:] {
 					switch char {
 					case "#": // job number
 						target = fmt.Sprintf("%d", chunk.ID)
-					case ".": // remove last extension
-						x = strings.LastIndex(target, ".")
+						break LOOP
+					case ".": // remove last extension of the basename
+						td = filepath.Dir(target)
+						tb = filepath.Base(target)
+						x = strings.LastIndex(tb, ".")
 						if x > 0 {
-							target = target[0:x]
+							tb = tb[0:x]
 						}
-					case ":": // remove any extension
-						x = strings.Index(target, ".")
+						target = filepath.Join(td, tb)
+					case ":": // remove any extension of the basename
+						td = filepath.Dir(target)
+						tb = filepath.Base(target)
+						x = strings.Index(tb, ".")
 						if x > 0 {
-							target = target[0:x]
+							tb = tb[0:x]
 						}
+						target = filepath.Join(td, tb)
 					case "/": // dirname
 						target = filepath.Dir(target)
 					case "%": // basename

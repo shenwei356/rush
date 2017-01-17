@@ -413,7 +413,7 @@ type Options struct {
 	RetryInterval       time.Duration // retry interval
 	Timeout             time.Duration // timeout
 	StopOnErr           bool          // stop on any error
-	RecordSuccessfulCmd bool          // send sucessful command to chanel
+	RecordSuccessfulCmd bool          // send successful command to channel
 	Verbose             bool
 }
 

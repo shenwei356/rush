@@ -357,8 +357,8 @@ func init() {
       $ echo dir/file_1.txt.gz | rush 'echo {/} {%} {^_1.txt.gz}'
       dir file.txt.gz dir/file
   6. basename without last or any extension
-      $ echo dir/file.txt.gz | rush 'echo {%.} {%:}'
-      file.txt file
+	  $ echo dir.d/file.txt.gz | rush 'echo {.} {:} {%.} {%:}'
+	  dir.d/file.txt dir.d/file file.txt file
   7. job ID, combine fields and other replacement strings
       $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
       job 1: file.txt file s
