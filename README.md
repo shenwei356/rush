@@ -54,6 +54,7 @@ Major:
         - [x] `{%}`, basename (`{/}` in GNU parallel)
         - [x] `{.}`, remove the last extension
         - [x] `{:}`, remove any extension (GNU parallel does not have)
+        - [x] `{^suffix}`, remove `suffix`
     - [x] Combinations:
         - [x] `{%.}`, `{%:}`, basename without extension
         - [x] `{n.}`, `{n/}`, manipulate nth field
