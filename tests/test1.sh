@@ -11,7 +11,6 @@ app=./rush/rush
 
 set +e
 
-
 # -------------------------------------------------
 
 # basic
@@ -112,3 +111,25 @@ run time_out2 fn_check_timeout2
 assert_no_stderr
 assert_in_stdout "asdf"
 assert_equal $(cat $STDOUT_FILE | grep "asdf" | wc -l) 10
+
+# -------------------------------------------------
+
+# continue
+fn_check_continue() {
+    seq 1 10 | $app 'echo {}' -c -C t.rush
+    seq 1 10 | $app 'echo {}' -c -C t.rush
+    rm t.rush
+}
+run continue fn_check_continue
+assert_equal $(cat $STDERR_FILE | grep "ignore" | wc -l) 10
+
+# continue mutli-line cmds
+fn_check_continue() {
+    seq 1 10 | $app 'echo {};\
+        echo s{}' -c -C t2.rush
+    seq 1 10 | $app 'echo {};\
+        echo s{}' -c -C t2.rush
+    rm t2.rush
+}
+run continue fn_check_continue
+assert_equal $(cat $STDERR_FILE | grep "ignore" | wc -l) 10
