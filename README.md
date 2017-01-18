@@ -57,7 +57,7 @@ Major:
         - [x] `{^suffix}`, remove `suffix`
     - [x] Combinations:
         - [x] `{%.}`, `{%:}`, basename without extension
-        - [x] `{n.}`, `{n/}`, manipulate nth field
+        - [x] `{n.}`, `{n/}`, manipulate `n`th field
 - [x] **Custom record delimiter** (`-D`, default `\n`),
   settable **records sending to every command** (`-n`, default `1`),
   and **field delimiter** (`-d`, default `\s+`).

@@ -217,7 +217,7 @@ Source code: https://github.com/shenwei356/rush
 					cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
 					if config.Continue {
 						if _, runned = succCmds[cmdStr]; runned {
-							log.Infof("ignore previously finished cmd #%d: %s", id, cmdStr)
+							log.Infof("ignore cmd #%d: %s", id, cmdStr)
 							bfhSuccCmds.WriteString(cmdStr + "\n")
 						} else {
 							chCmdStr <- cmdStr
@@ -226,6 +226,7 @@ Source code: https://github.com/shenwei356/rush
 						chCmdStr <- cmdStr
 					}
 				}
+				bfhSuccCmds.Flush()
 
 				checkError(errors.Wrap(scanner.Err(), "read input data"))
 			}
@@ -262,6 +263,7 @@ Source code: https://github.com/shenwei356/rush
 			go func() {
 				for c := range chSuccessfulCmd {
 					bfhSuccCmds.WriteString(c + "\n")
+					bfhSuccCmds.Flush()
 				}
 				doneSaveSuccCmd <- 1
 			}()
