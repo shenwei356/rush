@@ -129,13 +129,14 @@ Source code: https://github.com/shenwei356/rush
 		}
 
 		// split function for scanner
+		recordDelimiter := []byte(config.RecordDelimiter)
 		split := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 			if atEOF && len(data) == 0 {
 				return 0, nil, nil
 			}
-			i := bytes.IndexAny(data, config.RecordDelimiter)
+			i := bytes.Index(data, recordDelimiter)
 			if i >= 0 {
-				return i + 1, data[0:i], nil // trim config.RecordDelimiter
+				return i + len(recordDelimiter), data[0:i], nil // trim config.RecordDelimiter
 				// return i + 1, data[0 : i+1], nil
 			}
 			if atEOF {
@@ -201,7 +202,7 @@ Source code: https://github.com/shenwei356/rush
 						if config.Continue {
 							if _, runned = succCmds[cmdStr]; runned {
 								log.Infof("ignore cmd #%d: %s", id, cmdStr)
-								bfhSuccCmds.WriteString(cmdStr + "\n")
+								bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 							} else {
 								chCmdStr <- cmdStr
 							}
@@ -218,7 +219,7 @@ Source code: https://github.com/shenwei356/rush
 					if config.Continue {
 						if _, runned = succCmds[cmdStr]; runned {
 							log.Infof("ignore cmd #%d: %s", id, cmdStr)
-							bfhSuccCmds.WriteString(cmdStr + "\n")
+							bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 						} else {
 							chCmdStr <- cmdStr
 						}
@@ -263,7 +264,7 @@ Source code: https://github.com/shenwei356/rush
 		if config.Continue {
 			go func() {
 				for c := range chSuccessfulCmd {
-					bfhSuccCmds.WriteString(c + "\n")
+					bfhSuccCmds.WriteString(c + endMarkOfCMD)
 					bfhSuccCmds.Flush()
 				}
 				doneSaveSuccCmd <- 1

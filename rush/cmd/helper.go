@@ -21,12 +21,12 @@
 package cmd
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
-
-	"github.com/shenwei356/breader"
 )
 
 // VERSION of this package
@@ -70,16 +70,40 @@ func exists(path string) (bool, error) {
 	return false, err
 }
 
-func readSuccCmds(file string) map[string]struct{} {
-	reader, err := breader.NewDefaultBufferedReader(file)
-	checkError(err)
+const endMarkOfCMD string = "__CMD__\n"
 
+func readSuccCmds(file string) map[string]struct{} {
 	cmds := make(map[string]struct{})
-	for chunk := range reader.Ch {
-		checkError(chunk.Err)
-		for _, data := range chunk.Data {
-			cmds[data.(string)] = struct{}{}
+	sep := []byte(endMarkOfCMD)
+	split := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
 		}
+		i := bytes.Index(data, sep)
+		if i >= 0 {
+			return i + len(endMarkOfCMD), data[0:i], nil
+		}
+		if atEOF {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	}
+
+	fh, err := os.Open(file)
+	checkError(err)
+	defer fh.Close()
+
+	scanner := bufio.NewScanner(bufio.NewReader(fh))
+	scanner.Buffer(make([]byte, 0, 16384), 2147483647)
+	scanner.Split(split)
+
+	var record string
+	for scanner.Scan() {
+		record = scanner.Text()
+		if record == "" {
+			continue
+		}
+		cmds[record] = struct{}{}
 	}
 	return cmds
 }

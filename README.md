@@ -246,7 +246,7 @@ See on [release page](https://github.com/shenwei356/rush/releases).
 ```
 rush -- parallelly execute shell commands
 
-Version: 0.0.9
+Version: 0.1.0
 
 Author: Wei Shen <shenwei356@gmail.com>
 
