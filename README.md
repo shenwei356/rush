@@ -240,6 +240,25 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         $    cat $f.html.txt | rush -v d=$f -d = 'phantomjs save_page.js "{}" > {d}/{3}.html' -j 20 -t 60 -r 3 -c; \
         $ done
 
+1. A bioinformatics example: mapping with `bwa`, and processing result with `samtools`:
+
+        $ tree raw.cluster.clean.mapping
+        raw.cluster.clean.mapping
+        ├── M1
+        │   ├── M1_1.fq.gz -> ../../raw.cluster.clean/M1/M1_1.fq.gz
+        │   ├── M1_2.fq.gz -> ../../raw.cluster.clean/M1/M1_2.fq.gz
+        ...
+
+        $ ref=ref/xxx.fa
+        $ threads=25
+        $ ls -d raw.cluster.clean.mapping/* | rush -v ref=$ref -v j=$threads \
+            'bwa mem -t {j} -M -a {ref} {}/{%}_1.fq.gz {}/{%}_2.fq.gz > {}/{%}.sam; \
+            samtools view -bS {}/{%}.sam > {}/{%}.bam; \
+            samtools sort -T {}/{%}.tmp -@ {j} {}/{%}.bam -o {}/{%}.sorted.bam; \
+            samtools index {}/{%}.sorted.bam; \
+            samtools flagstat {}/{%}.sorted.bam > {}/{%}.sorted.bam.flagstat; \
+            /bin/rm {}/{%}.bam {}/{%}.sam;' \
+            -j 2 --verbose -c -C mapping.rush
 
 ## Usage
 

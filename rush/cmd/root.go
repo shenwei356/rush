@@ -460,8 +460,8 @@ func getConfigs(cmd *cobra.Command) Config {
 		if reAssign.MatchString(s) {
 			found := reAssign.FindStringSubmatch(s)
 			switch found[1] {
-			case ".", ":", "/", "%", "#":
-				checkError(fmt.Errorf(`"var" in --v/--assign var=val should not be ".", ":", "/", "%%" or "#", given: "%s"`, found[1]))
+			case ".", ":", "/", "%", "#", "^":
+				checkError(fmt.Errorf(`"var" in --v/--assign var=val should not be ".", ":", "/", "%%", "^" or "#", given: "%s"`, found[1]))
 			}
 			assignMap[found[1]] = found[2]
 		} else {
