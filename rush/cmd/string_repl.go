@@ -107,6 +107,9 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 					switch char {
 					case "#": // job number
 						target = fmt.Sprintf("%d", chunk.ID)
+						if x == 0 && len(charsGroups[i:]) > 1 {
+							target = fmt.Sprintf("{%s}", chars)
+						}
 						break LOOP
 					case ".": // remove last extension of the basename
 						td = filepath.Dir(target)
@@ -132,7 +135,8 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 						rmSuffix = true
 						break LOOP
 					default:
-						target = ""
+						target = fmt.Sprintf("{%s}", chars)
+						break LOOP
 					}
 				}
 				if rmSuffix {
