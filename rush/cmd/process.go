@@ -610,6 +610,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 
 						if opts.StopOnErr {
 							if !cancelCalled.IsSet() {
+								log.Error("stop on first error(s)")
 								cancelCalled.Set()
 								close(cancel)
 								close(chCmd)
@@ -617,7 +618,6 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 									close(chSuccessfulCmd)
 								}
 								done <- 1
-								log.Error("stop on first error(s)")
 							}
 							stop = true
 							return
