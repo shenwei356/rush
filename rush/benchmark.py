@@ -18,9 +18,11 @@ tests = [
     ['lots of stdout & run long', 'seq 1 10', 'echo job:{}; sleep 2; seq 1 1000000'],
 ]
 
-apps = {'parallel': {'jobs': '-j', 'keep-order': '-k'},
-        'gargs': {'jobs': '-p', 'keep-order': '-o'},
-        'rush': {'jobs': '-j', 'keep-order': '-k'}}
+apps = {'parallel': {'jobs': '-j', 'keep-order': '-k'},  # parallel: GNU parallel (Perl)
+        # parallel: https://github.com/mmstick/parallel (Rust)
+        'rust-parallel': {'jobs': '-j', 'keep-order': ''},
+        'gargs': {'jobs': '-p', 'keep-order': '-o'},  # gargs: https://github.com/brentp/gargs (Go)
+        'rush': {'jobs': '-j', 'keep-order': '-k'}}  # rush: https://github.com/shenwei356/rush (Go)
 
 repeats = 1
 njobs = 4
