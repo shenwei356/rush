@@ -22,6 +22,7 @@
 - [Usage](#usage)
 - [Installation](#installation)
 - [Download](#download)
+- [Special Cases](#special-cases)
 - [Acknowledgements](#acknowledgements)
 - [Contact](#contact)
 - [License](#license)
@@ -255,10 +256,10 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         echo finish 2
         [ERRO] run cmd #1: sleep 3; echo 3; \
         echo finish 3: time out
-        
+
     Commands are saved to file (`-C`) right after it finished, so we can view
     the check finished jobs:
-    
+
         grep -c __CMD__ successful_cmds.rush
 
 1. A comprehensive example: downloading 1K+ pages given by three URL list files
@@ -408,6 +409,18 @@ OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/r
 OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.1/rush_darwin_amd64.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.1/rush_darwin_amd64.tar.gz)
 Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.1/rush_windows_386.exe.tar.gz)        |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.1/rush_windows_386.exe.tar.gz)
 Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.1/rush_windows_amd64.exe.tar.gz)|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.1/rush_windows_amd64.exe.tar.gz)
+
+## Special Cases
+
+- Shell `grep` returns exit code `1` when no matches found.
+`rush` thinks it failed to run.
+ Please use `grep foo bar || true` instead of `grep foo bar`.
+
+        $ seq 1 | rush 'echo abc | grep 123'
+        [ERRO] wait cmd #1: echo abc | grep 123: exit status 1
+        $ seq 1 | rush 'echo abc | grep 123 || true'
+
+
 
 ## Acknowledgements
 
