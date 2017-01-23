@@ -177,10 +177,20 @@ func (c *Command) Run() error {
 	return nil
 }
 
+var isWindows bool = runtime.GOOS == "windows"
+
 func getShell() string {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "sh"
+	var shell string
+	if isWindows {
+		shell = os.Getenv("COMSPEC")
+		if shell == "" {
+			shell = "C:\\WINDOWS\\System32\\cmd.exe"
+		}
+	} else {
+		shell = os.Getenv("SHELL")
+		if shell == "" {
+			shell = "sh"
+		}
 	}
 	return shell
 }
@@ -226,18 +236,6 @@ var ErrTimeout = fmt.Errorf("time out")
 // ErrCancelled means command being cancelled
 var ErrCancelled = fmt.Errorf("cancelled")
 
-func splitCmdAndArgs(command string) (string, string) {
-	var c, args string
-	command = strings.Trim(command, " ")
-	i := strings.Index(command, " ")
-	if i >= 0 {
-		c = strings.Trim(command[0:i], " ")
-		args = strings.Trim(command[i:], " ")
-		return c, args
-	}
-	return command, ""
-}
-
 // run a command and pass output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
@@ -257,16 +255,14 @@ func (c *Command) run() error {
 
 	if c.Timeout > 0 {
 		c.ctx, c.ctxCancel = context.WithTimeout(context.Background(), c.Timeout)
-		if runtime.GOOS == "windows" {
-			exe, args := splitCmdAndArgs(qcmd)
-			command = exec.CommandContext(c.ctx, exe, args)
+		if isWindows {
+			command = exec.CommandContext(c.ctx, getShell(), "/c", qcmd)
 		} else {
 			command = exec.CommandContext(c.ctx, getShell(), "-c", qcmd)
 		}
 	} else {
-		if runtime.GOOS == "windows" {
-			exe, args := splitCmdAndArgs(qcmd)
-			command = exec.Command(exe, args)
+		if isWindows {
+			command = exec.Command(getShell(), "/c", qcmd)
 		} else {
 			command = exec.Command(getShell(), "-c", qcmd)
 		}

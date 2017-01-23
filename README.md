@@ -49,7 +49,7 @@ Major:
     - [x] Positional replacement strings: `{n}`
         - [x] `n`th field in delimiter-delimited data
         - [ ] `n`th matche of regular expression
-    - [x] Direcotry and file
+    - [x] Directory and file
         - [x] `{/}`, dirname  (`{//}` in GNU parallel)
         - [x] `{%}`, basename (`{/}` in GNU parallel)
         - [x] `{.}`, remove the last extension
