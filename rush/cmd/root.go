@@ -137,7 +137,6 @@ Source code: https://github.com/shenwei356/rush
 			i := bytes.Index(data, recordDelimiter)
 			if i >= 0 {
 				return i + len(recordDelimiter), data[0:i], nil // trim config.RecordDelimiter
-				// return i + 1, data[0 : i+1], nil
 			}
 			if atEOF {
 				return len(data), data, nil
@@ -156,6 +155,9 @@ Source code: https://github.com/shenwei356/rush
 
 		// read data and generate command
 		go func() {
+			n := config.NRecords
+			var id uint64 = 1
+
 		READFILES:
 			for _, file := range config.Infiles {
 				// input file handler
@@ -172,9 +174,6 @@ Source code: https://github.com/shenwei356/rush
 				// 2147483647: max int32
 				scanner.Buffer(make([]byte, 0, 16384), 2147483647)
 				scanner.Split(split)
-
-				n := config.NRecords
-				var id uint64 = 1
 
 				var record string
 				var records []string
@@ -239,6 +238,7 @@ Source code: https://github.com/shenwei356/rush
 			// }
 			donePreprocessFiles <- 1
 		}()
+
 		// ---------------------------------------------------------------
 
 		// run
@@ -270,6 +270,7 @@ Source code: https://github.com/shenwei356/rush
 				doneSaveSuccCmd <- 1
 			}()
 		}
+
 		// ---------------------------------------------------------------
 
 		chExitSignalMonitor := make(chan struct{})
@@ -288,6 +289,7 @@ Source code: https://github.com/shenwei356/rush
 				return
 			}
 		}()
+
 		// the order is very important!
 		<-donePreprocessFiles // finish read data and send command
 		<-doneSendOutput      // finish send output
