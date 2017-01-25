@@ -281,7 +281,11 @@ Source code: https://github.com/shenwei356/rush
 			select {
 			case <-signalChan:
 				log.Criticalf("received an interrupt, stopping unfinished commands...")
-				close(cancel)
+				select {
+				case <-cancel: // already closed
+				default:
+					close(cancel)
+				}
 				cleanupDone <- 1
 				return
 			case <-chExitSignalMonitor:

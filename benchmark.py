@@ -24,7 +24,6 @@ apps = {'parallel': {'jobs': '-j', 'keep-order': '-k'},  # parallel: GNU paralle
         'gargs': {'jobs': '-p', 'keep-order': '-o'},  # gargs: https://github.com/brentp/gargs (Go)
         'rush': {'jobs': '-j', 'keep-order': '-k'}}  # rush: https://github.com/shenwei356/rush (Go)
 
-repeats = 1
 njobs = 4
 
 for test in tests:

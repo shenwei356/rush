@@ -38,7 +38,6 @@ import (
 
 	"github.com/cznic/sortutil"
 	"github.com/pkg/errors"
-	"github.com/tevino/abool"
 )
 
 // Command is the Command struct
@@ -557,7 +556,6 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		chSuccessfulCmd = make(chan string, opts.Jobs)
 	}
 	done := make(chan int)
-	cancelCalled := abool.New()
 
 	go func() {
 		var wg sync.WaitGroup
@@ -605,9 +603,10 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 						}
 
 						if opts.StopOnErr {
-							if !cancelCalled.IsSet() {
+							select {
+							case <-cancel: // already closed
+							default:
 								log.Error("stop on first error(s)")
-								cancelCalled.Set()
 								close(cancel)
 								close(chCmd)
 								if opts.RecordSuccessfulCmd {
@@ -615,6 +614,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 								}
 								done <- 1
 							}
+
 							stop = true
 							return
 						}
