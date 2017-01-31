@@ -40,7 +40,7 @@ Major:
   Similar with `parallel --line-buffer`
 - [x] **Timeout** (`-t`)
 - [x] **Retry** (`-r`)
-- [x] **Safe exit after [capturing Ctrl+C](https://nathanleclaire.com/blog/2014/08/24/handling-ctrl-c-interrupt-signal-in-golang-programs/)**
+- [x] **Safe exit after capturing Ctrl-C**
 - [x] **Continue** (`-c`)
 - [x] **`awk -v` like custom defined variables** (`-v`)
 - [x] **Keeping output in order of input** (`-k`)
@@ -57,11 +57,11 @@ Major:
         - [x] `{^suffix}`, remove `suffix` (GNU parallel does not have)
     - [x] Combinations:
         - [x] `{%.}`, `{%:}`, basename without extension
-        - [x] `{n.}`, `{n/}`, manipulate `n`th field
+        - [x] `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
 - [x] **Custom record delimiter** (`-D`, default `\n`),
   settable **records sending to every command** (`-n`, default `1`),
   and **field delimiter** (`-d`, default `\s+`).
-- [x] **Exit on fist error(s)** (`-e`)
+- [x] **Exit on first error(s)** (`-e`)
 
 Minor:
 
@@ -194,7 +194,7 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         source: 2, data: 2
         source: 2, data: 3
 
-1. Interrupt jobs by `Ctrl + C`, rush will stop unfinished commands and exit.
+1. Interrupt jobs by `Ctrl-C`, rush will stop unfinished commands and exit.
 
         $ seq 1 20 | rush 'sleep 1; echo {}'
         ^C[CRIT] received an interrupt, stopping unfinished commands...
