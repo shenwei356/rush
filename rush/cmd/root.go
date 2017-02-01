@@ -345,9 +345,9 @@ func init() {
 	RootCmd.Flags().BoolP("dry-run", "", false, "print command but not run")
 
 	RootCmd.Flags().BoolP("continue", "c", false, `continue jobs.`+
-		` NOTES: 1) successful commands is saved in file (given by flag -C/--succ-cmd-file);`+
-		` 2) if the file does not exists, rush saves data so we can continue jobs next time;`+
-		` 3) if the file exists, rush ignores jobs in it`)
+		` NOTES: 1) successful commands are saved in file (given by flag -C/--succ-cmd-file);`+
+		` 2) if the file does not exist, rush saves data so we can continue jobs next time;`+
+		` 3) if the file exists, rush ignores jobs in it and update the file`)
 	RootCmd.Flags().StringP("succ-cmd-file", "C", "successful_cmds.rush", `file for saving successful commands`)
 
 	// RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of a command before saving to tmpfile (unit: Mb)")

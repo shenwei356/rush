@@ -34,40 +34,39 @@
 
 Major:
 
-- [x] **Avoid mixed line from multiple processes without loss of performance**,
+- **Avoid mixed line from multiple processes without loss of performance**,
   e.g. the first half of a line is from one process
   and the last half of the line is from another process.
   Similar with `parallel --line-buffer`
-- [x] **Timeout** (`-t`)
-- [x] **Retry** (`-r`)
-- [x] **Safe exit after capturing Ctrl-C**
-- [x] **Continue** (`-c`)
-- [x] **`awk -v` like custom defined variables** (`-v`)
-- [x] **Keeping output in order of input** (`-k`)
-- [x] **Practical replacement strings** (like GNU parallel):
-    - [x] `{#}`, job ID
-    - [x] `{}`, full data
-    - [x] Positional replacement strings: `{n}`
-        - [x] `n`th field in delimiter-delimited data
-    - [x] Directory and file
-        - [x] `{/}`, dirname  (`{//}` in GNU parallel)
-        - [x] `{%}`, basename (`{/}` in GNU parallel)
-        - [x] `{.}`, remove the last extension
-        - [x] `{:}`, remove any extension (GNU parallel does not have)
-        - [x] `{^suffix}`, remove `suffix` (GNU parallel does not have)
-    - [x] Combinations:
-        - [x] `{%.}`, `{%:}`, basename without extension
-        - [x] `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
-- [x] **Custom record delimiter** (`-D`, default `\n`),
+- **Timeout** (`-t`)
+- **Retry** (`-r`)
+- **Safe exit after capturing Ctrl-C**
+- **Continue** (`-c`)
+- **`awk -v` like custom defined variables** (`-v`)
+- **Keeping output in order of input** (`-k`)
+- **Practical replacement strings** (like GNU parallel):
+    - `{#}`, job ID
+    - `{}`, full data
+    - `{n}`, `n`th field in delimiter-delimited data
+    - Directory and file
+        - `{/}`, dirname  (`{//}` in GNU parallel)
+        - `{%}`, basename (`{/}` in GNU parallel)
+        - `{.}`, remove the last extension
+        - `{:}`, remove any extension (GNU parallel does not have)
+        - `{^suffix}`, remove `suffix` (GNU parallel does not have)
+    - Combinations:
+        - `{%.}`, `{%:}`, basename without extension
+        - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
+- **Custom record delimiter** (`-D`, default `\n`),
   settable **records sending to every command** (`-n`, default `1`),
   and **field delimiter** (`-d`, default `\s+`).
-- [x] **Exit on first error(s)** (`-e`)
+- **Exit on first error(s)** (`-e`)
 
 Minor:
 
-- [x] Dry run (`--dry-run`)
-- [x] Trim input data (`--trim`)
-- [x] Verbose output (`--verbose`)
+- Dry run (`--dry-run`)
+- Trim input data (`--trim`)
+- Verbose output (`--verbose`)
 
 ## Performance
 
