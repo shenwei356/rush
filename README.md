@@ -44,6 +44,10 @@ Major:
 - **Continue** (`-c`)
 - **`awk -v` like custom defined variables** (`-v`)
 - **Keeping output in order of input** (`-k`)
+- **Exit on first error(s)** (`-e`)
+- **Settable record delimiter** (`-D`, default `\n`),
+- **Settable records sending to every command** (`-n`, default `1`)
+- **Settable field delimiter** (`-d`, default `\s+`)
 - **Practical replacement strings** (like GNU parallel):
     - `{#}`, job ID
     - `{}`, full data
@@ -57,10 +61,6 @@ Major:
     - Combinations:
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
-- **Custom record delimiter** (`-D`, default `\n`),
-  settable **records sending to every command** (`-n`, default `1`),
-  and **field delimiter** (`-d`, default `\s+`).
-- **Exit on first error(s)** (`-e`)
 
 Minor:
 
@@ -340,7 +340,7 @@ Examples:
 
 Flags:
   -v, --assign stringSlice        assign the value val to the variable var (format: var=val)
-  -c, --continue                  continue jobs. NOTES: 1) successful commands is saved in file (given by flag -C/--succ-cmd-file); 2) if the file does not exists, rush saves data so we can continue jobs next time; 3) if the file exists, rush ignores jobs in it
+  -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves data so we can continue jobs next time; 3) if the file exists, rush ignores jobs in it and update the file
       --dry-run                   print command but not run
   -d, --field-delimiter string    field delimiter in records, support regular expression (default "\s+")
   -i, --infile stringSlice        input data file, multi-values supported

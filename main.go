@@ -18,24 +18,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package cmd
+package main
 
-import (
-	"os"
+func main() {
+	// go tool pprof ./rush pprof
+	// f, _ := os.Create("pprof")
+	// pprof.StartCPUProfile(f)
+	// defer pprof.StopCPUProfile()
 
-	"github.com/op/go-logging"
-)
+	Execute()
 
-var log *logging.Logger
-
-var logFormat = logging.MustStringFormatter(
-	// `%{color}%{time:15:04:05.000} %{shortfunc} ▶ %{level:.4s} %{id:03x}%{color:reset} %{message}`,
-	`%{color}[%{level:.4s}]%{color:reset} %{message}`,
-)
-
-func init() {
-	backend := logging.NewLogBackend(os.Stderr, "", 0)
-	backendFormatter := logging.NewBackendFormatter(backend, logFormat)
-	logging.SetBackend(backendFormatter)
-	log = logging.MustGetLogger("rush")
+	// go tool pprof --alloc_space ./rush mprof
+	// f2, _ := os.Create("mprof")
+	// pprof.WriteHeapProfile(f2)
+	// defer f2.Close()
 }

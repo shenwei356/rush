@@ -6,8 +6,8 @@ test -e ssshtest || wget -q https://raw.githubusercontent.com/ryanlayer/ssshtest
 set -e
 
 
-cd rush; go build -o rush; cd ..;
-app=./rush/rush
+go build -o rush
+app=./rush
 
 set +e
 

@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package cmd
+package main
 
 import (
 	"bufio"
@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/shenwei356/rush/process"
 	"github.com/spf13/cobra"
 )
 
@@ -50,6 +51,7 @@ Source code: https://github.com/shenwei356/rush
 
 `, VERSION),
 	Run: func(cmd *cobra.Command, args []string) {
+		process.Log = log
 		var err error
 		config := getConfigs(cmd)
 
@@ -112,7 +114,7 @@ Source code: https://github.com/shenwei356/rush
 			defer bfhSuccCmds.Flush()
 		}
 
-		opts := &Options{
+		opts := &process.Options{
 			DryRun:              config.DryRun,
 			Jobs:                config.Jobs,
 			KeepOrder:           config.KeepOrder,
@@ -242,7 +244,7 @@ Source code: https://github.com/shenwei356/rush
 		// ---------------------------------------------------------------
 
 		// run
-		chOutput, chSuccessfulCmd, doneSendOutput := Run4Output(opts, cancel, chCmdStr)
+		chOutput, chSuccessfulCmd, doneSendOutput := process.Run4Output(opts, cancel, chCmdStr)
 
 		// read from chOutput and print
 		doneOutput := make(chan int)

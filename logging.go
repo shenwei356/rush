@@ -20,18 +20,18 @@
 
 package main
 
-import "github.com/shenwei356/rush/rush/cmd"
+import (
+	"os"
 
-func main() {
-	// go tool pprof ./rush pprof
-	// f, _ := os.Create("pprof")
-	// pprof.StartCPUProfile(f)
-	// defer pprof.StopCPUProfile()
+	"github.com/op/go-logging"
+)
 
-	cmd.Execute()
+var log *logging.Logger
 
-	// go tool pprof --alloc_space ./rush mprof
-	// f2, _ := os.Create("mprof")
-	// pprof.WriteHeapProfile(f2)
-	// defer f2.Close()
+func init() {
+	logFormat := logging.MustStringFormatter(`%{color}[%{level:.4s}]%{color:reset} %{message}`)
+	backend := logging.NewLogBackend(os.Stderr, "", 0)
+	backendFormatter := logging.NewBackendFormatter(backend, logFormat)
+	logging.SetBackend(backendFormatter)
+	log = logging.MustGetLogger("rush")
 }

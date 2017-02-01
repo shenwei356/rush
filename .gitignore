@@ -1,8 +1,8 @@
 *.directory
-rush/rush*
-rush/binaries*
-rush/t.*
-rush/pprof
-rush/mprof
+rush
+binaries
+t.*
+pprof
+mprof
 doc/site*
 *ssshtest

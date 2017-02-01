@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package cmd
+package process
 
 import (
 	"bufio"
@@ -37,8 +37,22 @@ import (
 	"time"
 
 	"github.com/cznic/sortutil"
+	"github.com/op/go-logging"
 	"github.com/pkg/errors"
 )
+
+// Log is *logging.Logger
+var Log *logging.Logger
+
+func init() {
+	if Log == nil {
+		logFormat := logging.MustStringFormatter(`%{color}[%{level:.4s}]%{color:reset} %{message}`)
+		backend := logging.NewLogBackend(os.Stderr, "", 0)
+		backendFormatter := logging.NewBackendFormatter(backend, logFormat)
+		logging.SetBackend(backendFormatter)
+		Log = logging.MustGetLogger("process")
+	}
+}
 
 // Command is the Command struct
 type Command struct {
@@ -106,7 +120,7 @@ func (c *Command) Run() error {
 	}
 
 	if Verbose {
-		log.Infof("finish cmd #%d in %s: %s", c.ID, c.Duration, c.Cmd)
+		Log.Infof("finish cmd #%d in %s: %s", c.ID, c.Duration, c.Cmd)
 	}
 
 	go func() {
@@ -163,11 +177,11 @@ func (c *Command) Run() error {
 		}
 
 		// if Verbose {
-		// 	log.Debugf("cmd #%d sent %d bytes\n", c.ID, N)
+		// 	Log.Debugf("cmd #%d sent %d bytes\n", c.ID, N)
 		// }
 
 		// if Verbose {
-		// 	log.Infof("finish reading data from: %s", c.Cmd)
+		// 	Log.Infof("finish reading data from: %s", c.Cmd)
 		// }
 
 		close(c.Ch)
@@ -199,7 +213,7 @@ func (c *Command) Cleanup() error {
 	var err error
 	if c.tmpfh != nil {
 		// if Verbose {
-		// 	log.Infof("close tmpfh for: %s", c.Cmd)
+		// 	Log.Infof("close tmpfh for: %s", c.Cmd)
 		// }
 		err = c.tmpfh.Close()
 		if err != nil {
@@ -209,7 +223,7 @@ func (c *Command) Cleanup() error {
 
 	if c.tmpfile != "" {
 		// if Verbose {
-		// 	log.Infof("remove tmpfile of command: %s", c.Cmd)
+		// 	Log.Infof("remove tmpfile of command: %s", c.Cmd)
 		// }
 		err = os.Remove(c.tmpfile)
 	}
@@ -249,7 +263,7 @@ func (c *Command) run() error {
 	var command *exec.Cmd
 	qcmd := fmt.Sprintf(`%s`, c.Cmd)
 	if Verbose {
-		log.Infof("start  cmd #%d: %s", c.ID, qcmd)
+		Log.Infof("start  cmd #%d: %s", c.ID, qcmd)
 	}
 
 	if c.Timeout > 0 {
@@ -277,7 +291,7 @@ func (c *Command) run() error {
 
 	err = command.Start()
 	if err != nil {
-		checkError(errors.Wrapf(err, "start cmd #%d: %s", c.ID, c.Cmd))
+		return errors.Wrapf(err, "start cmd #%d: %s", c.ID, c.Cmd)
 	}
 
 	bpipe := bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
@@ -289,7 +303,7 @@ func (c *Command) run() error {
 		select {
 		case <-c.Cancel:
 			if Verbose {
-				log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
+				Log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
 			}
 			chErr <- ErrCancelled
 			command.Process.Kill()
@@ -358,7 +372,7 @@ func (c *Command) run() error {
 	}
 
 	// if Verbose {
-	// 	log.Infof("create tmpfile for command: %s", c.Cmd)
+	// 	Log.Infof("create tmpfile for command: %s", c.Cmd)
 	// }
 
 	c.tmpfh, err = ioutil.TempFile("", tmpfilePrefix)
@@ -434,7 +448,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 				select {
 				case <-cancel:
 					if Verbose {
-						log.Debugf("cancel receiving finished cmd")
+						Log.Debugf("cancel receiving finished cmd")
 					}
 					break RECEIVECMD
 				default: // needed
@@ -457,13 +471,13 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 						// }
 						chOut <- msg
 					}
-					checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd #%d: %s", c.ID, c.Cmd))
+					c.Cleanup()
 
 					// if Verbose {
-					// 	log.Debugf("receive %d bytes from cmd #%d\n", N, c.ID)
+					// 	Log.Debugf("receive %d bytes from cmd #%d\n", N, c.ID)
 					// }
 					// if Verbose {
-					// 	log.Infof("finish receiving data from: %s", c.Cmd)
+					// 	Log.Infof("finish receiving data from: %s", c.Cmd)
 					// }
 				}(c)
 			}
@@ -480,7 +494,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 				select {
 				case <-cancel:
 					if Verbose {
-						log.Debugf("cancel receiving finished cmd")
+						Log.Debugf("cancel receiving finished cmd")
 					}
 					break RECEIVECMD2
 				default: // needed
@@ -490,7 +504,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 					for msg := range c.Ch {
 						chOut <- msg
 					}
-					checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
+					c.Cleanup()
 
 					id++
 				} else { // wait the ID come out
@@ -499,7 +513,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 							for msg := range c1.Ch {
 								chOut <- msg
 							}
-							checkError(errors.Wrapf(c1.Cleanup(), "remove tmpfile for cmd: %s", c1.Cmd))
+							c1.Cleanup()
 
 							delete(cmds, c1.ID)
 							id++
@@ -523,7 +537,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 					for msg := range c.Ch {
 						chOut <- msg
 					}
-					checkError(errors.Wrapf(c.Cleanup(), "remove tmpfile for cmd: %s", c.Cmd))
+					c.Cleanup()
 				}
 			}
 
@@ -535,7 +549,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 		close(chOut)
 
 		// if Verbose {
-		// 	log.Infof("finish sending all output")
+		// 	Log.Infof("finish sending all output")
 		// }
 		done <- 1
 	}()
@@ -567,7 +581,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 			select {
 			case <-cancel:
 				if Verbose {
-					log.Debugf("cancel receiving commands")
+					Log.Debugf("cancel receiving commands")
 				}
 				break RECEIVECMD
 			default: // needed
@@ -597,16 +611,16 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 					err := command.Run()
 					if err != nil { // fail to run
 						if chances == 0 || opts.StopOnErr {
-							log.Error(err)
+							Log.Error(err)
 						} else {
-							log.Warning(err)
+							Log.Warning(err)
 						}
 
 						if opts.StopOnErr {
 							select {
 							case <-cancel: // already closed
 							default:
-								log.Error("stop on first error(s)")
+								Log.Error("stop on first error(s)")
 								close(cancel)
 								close(chCmd)
 								if opts.RecordSuccessfulCmd {
@@ -620,7 +634,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 						}
 						if chances > 0 {
 							if Verbose && opts.Retries > 0 {
-								log.Warningf("retry %d/%d times: %s",
+								Log.Warningf("retry %d/%d times: %s",
 									opts.Retries-chances+1,
 									opts.Retries, command.Cmd)
 							}
