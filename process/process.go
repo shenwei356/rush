@@ -655,7 +655,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 			id++
 		}
 		wg.Wait()
-		close(chCmd)
+		if !stop {
+			close(chCmd)
+		}
 		if opts.RecordSuccessfulCmd {
 			close(chSuccessfulCmd)
 		}
