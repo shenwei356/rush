@@ -111,7 +111,6 @@ Source code: https://github.com/shenwei356/rush
 			defer fhSuccCmds.Close()
 
 			bfhSuccCmds = bufio.NewWriter(fhSuccCmds)
-			defer bfhSuccCmds.Flush()
 		}
 
 		opts := &process.Options{
@@ -227,9 +226,6 @@ Source code: https://github.com/shenwei356/rush
 					} else {
 						chCmdStr <- cmdStr
 					}
-				}
-				if config.Continue {
-					bfhSuccCmds.Flush()
 				}
 				checkError(errors.Wrap(scanner.Err(), "read input data"))
 			}

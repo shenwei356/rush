@@ -644,11 +644,12 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 						}
 						return
 					}
-					chCmd <- command
-					if opts.RecordSuccessfulCmd {
-						chSuccessfulCmd <- cmdStr
-					}
 					break
+				}
+
+				chCmd <- command
+				if opts.RecordSuccessfulCmd {
+					chSuccessfulCmd <- cmdStr
 				}
 
 			}(id, cmdStr)
@@ -657,9 +658,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		wg.Wait()
 		if !stop {
 			close(chCmd)
-		}
-		if opts.RecordSuccessfulCmd {
-			close(chSuccessfulCmd)
+			if opts.RecordSuccessfulCmd {
+				close(chSuccessfulCmd)
+			}
 		}
 
 		done <- 1
