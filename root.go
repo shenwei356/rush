@@ -201,8 +201,9 @@ Source code: https://github.com/shenwei356/rush
 						cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
 						if config.Continue {
 							if _, runned = succCmds[cmdStr]; runned {
-								log.Infof("ignore cmd #%d: %s", id, cmdStr)
+								log.Infof("ignore cmd: %s", cmdStr)
 								bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
+								bfhSuccCmds.Flush()
 							} else {
 								chCmdStr <- cmdStr
 							}
@@ -218,8 +219,9 @@ Source code: https://github.com/shenwei356/rush
 					cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
 					if config.Continue {
 						if _, runned = succCmds[cmdStr]; runned {
-							log.Infof("ignore cmd #%d: %s", id, cmdStr)
+							log.Infof("ignore cmd: %s", cmdStr)
 							bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
+							bfhSuccCmds.Flush()
 						} else {
 							chCmdStr <- cmdStr
 						}
