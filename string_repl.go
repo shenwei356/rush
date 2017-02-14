@@ -43,11 +43,11 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 	for i, r := range chunk.Data {
 		switch config.Trim {
 		case "l":
-			records[i] = strings.TrimLeft(r, " \t\n")
+			records[i] = strings.TrimLeft(r, " \t\r\n")
 		case "r":
-			records[i] = strings.TrimRight(r, " \t\n")
+			records[i] = strings.TrimRight(r, " \t\r\n")
 		case "lr", "rl", "b":
-			records[i] = strings.Trim(r, " \t\n")
+			records[i] = strings.Trim(r, " \t\r\n")
 		default:
 			records[i] = r
 		}
