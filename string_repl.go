@@ -55,6 +55,10 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 
 	fieldsStr := strings.Join(records, config.RecordsJoinSeparator)
 
+	if len(fieldsStr) == 0 || fieldsStr == "\n" {
+		return ""
+	}
+
 	var fields []string
 
 	var chars, char, target string

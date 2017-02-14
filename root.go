@@ -135,6 +135,9 @@ Source code: https://github.com/shenwei356/rush
 			if atEOF && len(data) == 0 {
 				return 0, nil, nil
 			}
+			if len(recordDelimiter) == 0 {
+				return 1, data[0:1], nil
+			}
 			i := bytes.Index(data, recordDelimiter)
 			if i >= 0 {
 				return i + len(recordDelimiter), data[0:i], nil // trim config.RecordDelimiter
@@ -199,6 +202,27 @@ Source code: https://github.com/shenwei356/rush
 
 					if len(records) == n {
 						cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
+						if len(cmdStr) > 0 {
+							if config.Continue {
+								if _, runned = succCmds[cmdStr]; runned {
+									log.Infof("ignore cmd: %s", cmdStr)
+									bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
+									bfhSuccCmds.Flush()
+								} else {
+									chCmdStr <- cmdStr
+								}
+							} else {
+								chCmdStr <- cmdStr
+							}
+
+							id++
+						}
+						records = make([]string, 0, n)
+					}
+				}
+				if len(records) > 0 {
+					cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
+					if len(cmdStr) > 0 {
 						if config.Continue {
 							if _, runned = succCmds[cmdStr]; runned {
 								log.Infof("ignore cmd: %s", cmdStr)
@@ -210,23 +234,6 @@ Source code: https://github.com/shenwei356/rush
 						} else {
 							chCmdStr <- cmdStr
 						}
-
-						id++
-						records = make([]string, 0, n)
-					}
-				}
-				if len(records) > 0 {
-					cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
-					if config.Continue {
-						if _, runned = succCmds[cmdStr]; runned {
-							log.Infof("ignore cmd: %s", cmdStr)
-							bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
-							bfhSuccCmds.Flush()
-						} else {
-							chCmdStr <- cmdStr
-						}
-					} else {
-						chCmdStr <- cmdStr
 					}
 				}
 				checkError(errors.Wrap(scanner.Err(), "read input data"))
@@ -375,10 +382,19 @@ func init() {
   8. custom field delimiter
       $ echo a=b=c | rush 'echo {1} {2} {3}' -d =
       a b c
-  9. assign value to variable, like "awk -v"
+  9. custom record delimiter
+      $ echo a=b=c | rush -D "=" -k 'echo {}'
+      a
+      b
+      c
+      $ echo abc | rush -D "" -k 'echo {}'
+      a
+      b
+      c
+  10. assign value to variable, like "awk -v"
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
-  10. save successful commands to continue in NEXT run
+  11. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
       [INFO] ignore cmd #1: sleep 1; echo 1
       [ERRO] run cmd #1: sleep 2; echo 2: time out

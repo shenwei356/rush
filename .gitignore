@@ -1,5 +1,5 @@
 *.directory
-rush
+rush*
 binaries
 t.*
 pprof
