@@ -43,7 +43,7 @@ Major:
   (`--line-buffer` in GNU parallel)
 - **Timeout** (`-t`). (`--timeout` in GNU parallel)
 - **Retry** (`-r`). (`--retry-failed --joblog` in GNU parallel)
-- **Safe exit after capturing Ctrl-C**. (***Not supported in GNU parallel***)
+- **Safe exit after capturing Ctrl-C**
 - **Continue** (`-c`). (`--resume --joblog` in GNU parallel,
   *but it does not support multi-line commands*)
 - **`awk -v` like custom defined variables** (`-v`). (***Not supported in GNU parallel***)
@@ -202,13 +202,6 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         var: b, data: 2
         var: b, data: 3
 
-        $ seq 2 | rush ' seq 3 | awk -v s={} "{print \"source: \" s \", data: \" \$1}" '
-        source: 1, data: 1
-        source: 1, data: 2
-        source: 1, data: 3
-        source: 2, data: 1
-        source: 2, data: 2
-        source: 2, data: 3
 
 1. Interrupt jobs by `Ctrl-C`, rush will stop unfinished commands and exit.
 
