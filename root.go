@@ -47,7 +47,7 @@ Version: %s
 
 Author: Wei Shen <shenwei356@gmail.com>
 
-Source code: https://github.com/shenwei356/rush
+Homepage: https://github.com/shenwei356/rush
 
 `, VERSION),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -360,7 +360,7 @@ func init() {
 	// RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of a command before saving to tmpfile (unit: Mb)")
 
 	RootCmd.Flags().StringSliceP("assign", "v", []string{}, "assign the value val to the variable var (format: var=val)")
-	RootCmd.Flags().StringP("trim", "T", "", `trim white space in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)`)
+	RootCmd.Flags().StringP("trim", "T", "", `trim white space (" \t\r\n") in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)`)
 
 	RootCmd.Example = `  1. simple run, quoting is not necessary
       $ seq 1 10 | rush echo {}
