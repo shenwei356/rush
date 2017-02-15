@@ -36,39 +36,41 @@
 
 Major:
 
+- Supporting Linux, OS X and **Windows** (not CygWin)!
 - **Avoid mixed line from multiple processes without loss of performance**,
   e.g. the first half of a line is from one process
   and the last half of the line is from another process.
-  Similar with `parallel --line-buffer`
-- **Timeout** (`-t`)
-- **Retry** (`-r`)
-- **Safe exit after capturing Ctrl-C**
-- **Continue** (`-c`)
-- **`awk -v` like custom defined variables** (`-v`)
-- **Keeping output in order of input** (`-k`)
-- **Exit on first error(s)** (`-e`)
-- **Settable record delimiter** (`-D`, default `\n`),
-- **Settable records sending to every command** (`-n`, default `1`)
-- **Settable field delimiter** (`-d`, default `\s+`)
+  (`--line-buffer` in GNU parallel)
+- **Timeout** (`-t`). (`--timeout` in GNU parallel)
+- **Retry** (`-r`). (`--retry-failed --joblog` in GNU parallel)
+- **Safe exit after capturing Ctrl-C**. (***Not supported in GNU parallel***)
+- **Continue** (`-c`). (`--resume --joblog` in GNU parallel,
+  *but it does not support multi-line commands*)
+- **`awk -v` like custom defined variables** (`-v`). (***Not supported in GNU parallel***)
+- **Keeping output in order of input** (`-k`). (Same `-k/--keep-order` in GNU parallel)
+- **Exit on first error(s)** (`-e`). (***Not supported in GNU parallel***)
+- **Settable record delimiter** (`-D`, default `\n`). (`--recstart` and `--recend` in GNU parallel)
+- **Settable records sending to every command** (`-n`, default `1`). (***Not supported in GNU parallel***)
+- **Settable field delimiter** (`-d`, default `\s+`). (Same `-d/--delimiter` in GNU parallel)
 - **Practical replacement strings** (like GNU parallel):
-    - `{#}`, job ID
-    - `{}`, full data
-    - `{n}`, `n`th field in delimiter-delimited data
+    - `{#}`, job ID. (Same in GNU parallel)
+    - `{}`, full data. (Same in GNU parallel)
+    - `{n}`, `n`th field in delimiter-delimited data. (Same in GNU parallel)
     - Directory and file
-        - `{/}`, dirname  (`{//}` in GNU parallel)
-        - `{%}`, basename (`{/}` in GNU parallel)
-        - `{.}`, remove the last extension
-        - `{:}`, remove any extension (GNU parallel does not have)
-        - `{^suffix}`, remove `suffix` (GNU parallel does not have)
+        - `{/}`, dirname. (Same in GNU parallel)
+        - `{%}`, basename. (`{/}` in GNU parallel)
+        - `{.}`, remove the last extension. (Same in GNU parallel)
+        - `{:}`, remove any extension (***Not supported in GNU parallel***)
+        - `{^suffix}`, remove `suffix` (***Not supported in GNU parallel***)
     - Combinations:
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
 
 Minor:
 
-- Dry run (`--dry-run`)
-- Trim input data (`--trim`)
-- Verbose output (`--verbose`)
+- Dry run (`--dry-run`). (Same in GNU parallel)
+- Trim input data (`--trim`). (Same in GNU parallel)
+- Verbose output (`--verbose`). (Same in GNU parallel)
 
 ## Performance
 
@@ -243,7 +245,7 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         [INFO] ignore cmd #2: sleep 2; echo 2
         [ERRO] run cmd #1: sleep 3; echo 3: time out
 
-    Commands of multi-lines
+    Commands of multi-lines (***Not supported in GNU parallel***)
 
         $ seq 1 3 | rush 'sleep {}; echo {}; \
         echo finish {}' -t 3 -c -C finished.rush
