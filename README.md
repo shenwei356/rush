@@ -57,12 +57,12 @@ Major:
     - `{}`, full data. (Same in GNU parallel)
     - `{n}`, `n`th field in delimiter-delimited data. (Same in GNU parallel)
     - Directory and file
-        - `{/}`, dirname. (Same in GNU parallel)
+        - `{/}`, dirname. (`{//}` in GNU parallel)
         - `{%}`, basename. (`{/}` in GNU parallel)
         - `{.}`, remove the last extension. (Same in GNU parallel)
         - `{:}`, remove any extension (***Not supported in GNU parallel***)
         - `{^suffix}`, remove `suffix` (***Not supported in GNU parallel***)
-    - Combinations:
+    - Combinations (***Combinations of 3+ replacement strings not supported in GNU parallel***):
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
 
