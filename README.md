@@ -65,6 +65,8 @@ Major:
     - Combinations (***Combinations of 3+ replacement strings not supported in GNU parallel***):
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
+- **Preset variable (macro)**, e.g., `rush -v p={^suffix} 'echo {p}_new_suffix'`,
+where `{p}` is replaced with `{^suffix}`.
 
 Minor:
 
@@ -202,6 +204,11 @@ See on [release page](https://github.com/shenwei356/rush/releases).
         var: b, data: 2
         var: b, data: 3
 
+1. **Preset variable** (`-v`), avoid repeatedly writing verbose replacement strings
+
+        # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
+        $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
+        read read_2.fq.gz
 
 1. Interrupt jobs by `Ctrl-C`, rush will stop unfinished commands and exit.
 
@@ -302,12 +309,25 @@ See on [release page](https://github.com/shenwei356/rush/releases).
             /bin/rm {}/{%}.bam {}/{%}.sam;' \
             -j 2 --verbose -c -C mapping.rush
 
+    Since `{}/{%}` appears many times, we can use preset variable (macro) to
+    simplify it:
+
+        $ ls -d raw.cluster.clean.mapping/* | rush -v ref=$ref -v j=$threads \
+            -v p='{}/{%}' \
+            'bwa mem -t {j} -M -a {ref} {p}_1.fq.gz {p}_2.fq.gz > {p}.sam; \
+            samtools view -bS {p}.sam > {p}.bam; \
+            samtools sort -T {p}.tmp -@ {j} {p}.bam -o {p}.sorted.bam; \
+            samtools index {p}.sorted.bam; \
+            samtools flagstat {p}.sorted.bam > {p}.sorted.bam.flagstat; \
+            /bin/rm {p}.bam {p}.sam;' \
+            -j 2 --verbose -c -C mapping.rush
+
 ## Usage
 
 ```
 rush -- parallelly execute shell commands
 
-Version: 0.1.7
+Version: 0.1.8
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -349,7 +369,11 @@ Examples:
   10. assign value to variable, like "awk -v"
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
-  11. save successful commands to continue in NEXT run
+  11. preset variable
+      # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
+      $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
+      read read_2.fq.gz
+  12. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
       [INFO] ignore cmd #1: sleep 1; echo 1
       [ERRO] run cmd #1: sleep 2; echo 2: time out
@@ -358,7 +382,7 @@ Examples:
   More examples: https://github.com/shenwei356/rush
 
 Flags:
-  -v, --assign stringSlice        assign the value val to the variable var (format: var=val)
+  -v, --assign stringSlice        assign the value val to the variable var (format: var=val, val also supports replacement strings)
   -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves data so we can continue jobs next time; 3) if the file exists, rush ignores jobs in it and update the file
       --dry-run                   print command but not run
   -d, --field-delimiter string    field delimiter in records, support regular expression (default "\s+")

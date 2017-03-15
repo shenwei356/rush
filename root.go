@@ -359,8 +359,9 @@ func init() {
 
 	// RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of a command before saving to tmpfile (unit: Mb)")
 
-	RootCmd.Flags().StringSliceP("assign", "v", []string{}, "assign the value val to the variable var (format: var=val)")
+	RootCmd.Flags().StringSliceP("assign", "v", []string{}, "assign the value val to the variable var (format: var=val, val also supports replacement strings)")
 	RootCmd.Flags().StringP("trim", "T", "", `trim white space (" \t\r\n") in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)`)
+	// RootCmd.Flags().BoolP("greedy", "g", false, `greedy replacement strings (replace again), useful for preset variable, e.g., rush -v p={:^_1} 'echo {p}'`)
 
 	RootCmd.Example = `  1. simple run, quoting is not necessary
       $ seq 1 10 | rush echo {}
@@ -394,7 +395,11 @@ func init() {
   10. assign value to variable, like "awk -v"
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
-  11. save successful commands to continue in NEXT run
+  11. preset variable
+      # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
+      $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
+      read read_2.fq.gz
+  12. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
       [INFO] ignore cmd #1: sleep 1; echo 1
       [ERRO] run cmd #1: sleep 2; echo 2: time out
@@ -456,8 +461,10 @@ type Config struct {
 	Continue    bool
 	SuccCmdFile string
 
-	AssignMap map[string]string
-	Trim      string
+	AssignMap   map[string]string
+	Trim        string
+	Greedy      bool
+	GreedyCount int
 }
 
 // var=value
@@ -516,7 +523,9 @@ func getConfigs(cmd *cobra.Command) Config {
 		Continue:    getFlagBool(cmd, "continue"),
 		SuccCmdFile: getFlagString(cmd, "succ-cmd-file"),
 
-		Trim:      trim,
-		AssignMap: assignMap,
+		Trim:        trim,
+		AssignMap:   assignMap,
+		Greedy:      true, // getFlagBool(cmd, "greedy"),
+		GreedyCount: 1,
 	}
 }

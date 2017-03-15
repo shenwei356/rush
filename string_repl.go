@@ -157,5 +157,10 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 		j = found[3] + 1
 	}
 	buf.WriteString(command[j:])
-	return buf.String()
+
+	if !config.Greedy || config.GreedyCount <= 0 {
+		return buf.String()
+	}
+	config.GreedyCount--
+	return fillCommand(config, buf.String(), chunk)
 }
