@@ -66,7 +66,7 @@ Major:
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
 - **Preset variable (macro)**, e.g., `rush -v p={^suffix} 'echo {p}_new_suffix'`,
-where `{p}` is replaced with `{^suffix}`.
+where `{p}` is replaced with `{^suffix}`. (***Not supported in GNU parallel***)
 
 Minor:
 
