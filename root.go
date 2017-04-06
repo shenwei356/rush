@@ -71,7 +71,11 @@ Homepage: https://github.com/shenwei356/rush
 
 		command0 := strings.Join(args, " ")
 		if command0 == "" {
-			command0 = `echo "{}"`
+			if runtime.GOOS == "windows" {
+				command0 = `echo {}`
+			} else {
+				command0 = `echo "{}"`
+			}
 		}
 
 		// -----------------------------------------------------------------
