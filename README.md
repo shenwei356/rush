@@ -20,9 +20,9 @@
 
 - [Features](#features)
 - [Performance](#performance)
-- [Examples](#examples)
-- [Usage](#usage)
 - [Installation](#installation)
+- [Usage](#usage)
+- [Examples](#examples)
 - [Special Cases](#special-cases)
 - [Acknowledgements](#acknowledgements)
 - [Contact](#contact)
@@ -73,10 +73,143 @@ Minor:
 - Trim input data (`--trim`). (Same in GNU parallel)
 - Verbose output (`--verbose`). (Same in GNU parallel)
 
+
 ## Performance
 
 Performance of `rush` is similar to `gargs`, and they are both slightly faster than `parallel` (Perl).
 See on [release page](https://github.com/shenwei356/rush/releases).
+
+
+## Installation
+
+`rush` is implemented in [Go](https://golang.org/) programming language,
+ executable binary files **for most popular operating systems** are freely available
+  in [release](https://github.com/shenwei356/rush/releases) page.
+
+#### Method 1: Download binaries
+
+[rush v0.1.8](https://github.com/shenwei356/rush/releases/tag/v0.1.8)
+[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.1.8/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.1.7)
+
+
+OS     |Arch      |File, (mirror为中国用户下载镜像链接)                                                                                                                                                                         |Download Count
+:------|:---------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_386.tar.gz)
+Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_amd64.tar.gz)
+OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_386.tar.gz))                         |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_386.tar.gz)
+OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_amd64.tar.gz)
+Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_386.exe.tar.gz)
+Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_amd64.exe.tar.gz)
+
+
+Just [download](https://github.com/shenwei356/rush/releases) compressed
+executable file of your operating system,
+and decompress it with `tar -zxvf *.tar.gz` command or other tools.
+And then:
+
+1. **For Linux-like systems**
+    1. If you have root privilege simply copy it to `/usr/local/bin`:
+
+            sudo cp rush /usr/local/bin/
+
+    1. Or add the current directory of the executable file to environment variable
+    `PATH`:
+
+            echo export PATH=\$PATH:\"$(pwd)\" >> ~/.bashrc
+            source ~/.bashrc
+
+
+1. **For windows**, just copy `rush.exe` to `C:\WINDOWS\system32`.
+
+#### Method 2: For Go developer
+
+    go get -u github.com/shenwei356/rush/
+
+
+## Usage
+
+```
+rush -- parallelly execute shell commands
+
+Version: 0.1.8
+
+Author: Wei Shen <shenwei356@gmail.com>
+
+Homepage: https://github.com/shenwei356/rush
+
+Usage:
+  rush [flags] [command] [args of command...]
+
+Examples:
+  1. simple run, quoting is not necessary
+      $ seq 1 10 | rush echo {}
+  2. keep order
+      $ seq 1 10 | rush 'echo {}' -k
+  3. timeout
+      $ seq 1 | rush 'sleep 2; echo {}' -t 1
+  4. retry
+      $ seq 1 | rush 'python script.py' -r 3
+  5. dirname & basename & remove suffix
+      $ echo dir/file_1.txt.gz | rush 'echo {/} {%} {^_1.txt.gz}'
+      dir file.txt.gz dir/file
+  6. basename without last or any extension
+      $ echo dir.d/file.txt.gz | rush 'echo {.} {:} {%.} {%:}'
+      dir.d/file.txt dir.d/file file.txt file
+  7. job ID, combine fields and other replacement strings
+      $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
+      job 1: file.txt file s
+  8. custom field delimiter
+      $ echo a=b=c | rush 'echo {1} {2} {3}' -d =
+      a b c
+  9. custom record delimiter
+      $ echo a=b=c | rush -D "=" -k 'echo {}'
+      a
+      b
+      c
+      $ echo abc | rush -D "" -k 'echo {}'
+      a
+      b
+      c
+  10. assign value to variable, like "awk -v"
+      $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
+      Hello, Wei Shen!
+  11. preset variable
+      # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
+      $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
+      read read_2.fq.gz
+  12. save successful commands to continue in NEXT run
+      $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
+      [INFO] ignore cmd #1: sleep 1; echo 1
+      [ERRO] run cmd #1: sleep 2; echo 2: time out
+      [ERRO] run cmd #2: sleep 3; echo 3: time out
+
+  More examples: https://github.com/shenwei356/rush
+
+Flags:
+  -v, --assign stringSlice        assign the value val to the variable var (format: var=val, val also supports replacement strings)
+  -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves data so we can continue jobs next time; 3) if the file exists, rush ignores jobs in it and update the file
+      --dry-run                   print command but not run
+  -d, --field-delimiter string    field delimiter in records, support regular expression (default "\s+")
+  -i, --infile stringSlice        input data file, multi-values supported
+  -j, --jobs int                  run n jobs in parallel (default value depends on your device) (default 4)
+  -k, --keep-order                keep output in order of input
+  -n, --nrecords int              number of records sent to a command (default 1)
+  -o, --out-file string           out file ("-" for stdout) (default "-")
+  -D, --record-delimiter string   record delimiter (default is "\n") (default "
+")
+  -J, --records-join-sep string   record separator for joining multi-records (default is "\n") (default "
+")
+  -r, --retries int               maximum retries (default 0)
+      --retry-interval int        retry interval (unit: second) (default 0)
+  -e, --stop-on-error             stop all processes on first error(s)
+  -C, --succ-cmd-file string      file for saving successful commands (default "successful_cmds.rush")
+  -t, --timeout int               timeout of a command (unit: second, 0 for no timeout) (default 0)
+  -T, --trim string               trim white space (" \t\r\n") in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)
+      --verbose                   print verbose information
+  -V, --version                   print version information and check for update
+
+```
+
 
 ## Examples
 
@@ -321,134 +454,6 @@ See on [release page](https://github.com/shenwei356/rush/releases).
             /bin/rm {p}.bam {p}.sam;' \
             -j 2 --verbose -c -C mapping.rush
 
-## Usage
-
-```
-rush -- parallelly execute shell commands
-
-Version: 0.1.8
-
-Author: Wei Shen <shenwei356@gmail.com>
-
-Homepage: https://github.com/shenwei356/rush
-
-Usage:
-  rush [flags] [command] [args of command...]
-
-Examples:
-  1. simple run, quoting is not necessary
-      $ seq 1 10 | rush echo {}
-  2. keep order
-      $ seq 1 10 | rush 'echo {}' -k
-  3. timeout
-      $ seq 1 | rush 'sleep 2; echo {}' -t 1
-  4. retry
-      $ seq 1 | rush 'python script.py' -r 3
-  5. dirname & basename & remove suffix
-      $ echo dir/file_1.txt.gz | rush 'echo {/} {%} {^_1.txt.gz}'
-      dir file.txt.gz dir/file
-  6. basename without last or any extension
-      $ echo dir.d/file.txt.gz | rush 'echo {.} {:} {%.} {%:}'
-      dir.d/file.txt dir.d/file file.txt file
-  7. job ID, combine fields and other replacement strings
-      $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
-      job 1: file.txt file s
-  8. custom field delimiter
-      $ echo a=b=c | rush 'echo {1} {2} {3}' -d =
-      a b c
-  9. custom record delimiter
-      $ echo a=b=c | rush -D "=" -k 'echo {}'
-      a
-      b
-      c
-      $ echo abc | rush -D "" -k 'echo {}'
-      a
-      b
-      c
-  10. assign value to variable, like "awk -v"
-      $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
-      Hello, Wei Shen!
-  11. preset variable
-      # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
-      $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
-      read read_2.fq.gz
-  12. save successful commands to continue in NEXT run
-      $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
-      [INFO] ignore cmd #1: sleep 1; echo 1
-      [ERRO] run cmd #1: sleep 2; echo 2: time out
-      [ERRO] run cmd #2: sleep 3; echo 3: time out
-
-  More examples: https://github.com/shenwei356/rush
-
-Flags:
-  -v, --assign stringSlice        assign the value val to the variable var (format: var=val, val also supports replacement strings)
-  -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves data so we can continue jobs next time; 3) if the file exists, rush ignores jobs in it and update the file
-      --dry-run                   print command but not run
-  -d, --field-delimiter string    field delimiter in records, support regular expression (default "\s+")
-  -i, --infile stringSlice        input data file, multi-values supported
-  -j, --jobs int                  run n jobs in parallel (default value depends on your device) (default 4)
-  -k, --keep-order                keep output in order of input
-  -n, --nrecords int              number of records sent to a command (default 1)
-  -o, --out-file string           out file ("-" for stdout) (default "-")
-  -D, --record-delimiter string   record delimiter (default is "\n") (default "
-")
-  -J, --records-join-sep string   record separator for joining multi-records (default is "\n") (default "
-")
-  -r, --retries int               maximum retries (default 0)
-      --retry-interval int        retry interval (unit: second) (default 0)
-  -e, --stop-on-error             stop all processes on first error(s)
-  -C, --succ-cmd-file string      file for saving successful commands (default "successful_cmds.rush")
-  -t, --timeout int               timeout of a command (unit: second, 0 for no timeout) (default 0)
-  -T, --trim string               trim white space (" \t\r\n") in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)
-      --verbose                   print verbose information
-  -V, --version                   print version information and check for update
-
-```
-
-## Installation
-
-`rush` is implemented in [Go](https://golang.org/) programming language,
- executable binary files **for most popular operating systems** are freely available
-  in [release](https://github.com/shenwei356/rush/releases) page.
-
-#### Method 1: Download binaries
-
-[rush v0.1.8](https://github.com/shenwei356/rush/releases/tag/v0.1.8)
-[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.1.8/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.1.7)
-
-
-OS     |Arch      |File, (mirror为中国用户下载镜像链接)                                                                                                                                                                         |Download Count
-:------|:---------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_386.tar.gz)
-Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_amd64.tar.gz)
-OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_386.tar.gz))                         |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_386.tar.gz)
-OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_amd64.tar.gz)
-Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_386.exe.tar.gz)
-Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_amd64.exe.tar.gz)
-
-
-Just [download](https://github.com/shenwei356/rush/releases) compressed
-executable file of your operating system,
-and decompress it with `tar -zxvf *.tar.gz` command or other tools.
-And then:
-
-1. **For Linux-like systems**
-    1. If you have root privilege simply copy it to `/usr/local/bin`:
-
-            sudo cp rush /usr/local/bin/
-
-    1. Or add the current directory of the executable file to environment variable
-    `PATH`:
-
-            echo export PATH=\$PATH:\"$(pwd)\" >> ~/.bashrc
-            source ~/.bashrc
-
-
-1. **For windows**, just copy `rush.exe` to `C:\WINDOWS\system32`.
-
-#### Method 2: For Go developer
-
-    go get -u github.com/shenwei356/rush/
 
 ## Special Cases
 
@@ -459,8 +464,6 @@ And then:
         $ seq 1 | rush 'echo abc | grep 123'
         [ERRO] wait cmd #1: echo abc | grep 123: exit status 1
         $ seq 1 | rush 'echo abc | grep 123 || true'
-
-
 
 ## Acknowledgements
 
