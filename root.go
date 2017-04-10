@@ -39,9 +39,9 @@ import (
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "rush",
-	Short: "parallelly execute shell commands",
+	Short: "a cross-platform command-line tool for executing jobs in parallel",
 	Long: fmt.Sprintf(`
-rush -- parallelly execute shell commands
+rush -- a cross-platform command-line tool for executing jobs in parallel
 
 Version: %s
 

@@ -1,4 +1,4 @@
-# rush
+# rush -- a cross-platform command-line tool for executing jobs in parallel
 
 [![Build Status](https://travis-ci.org/shenwei356/rush.svg?branch=master)](https://travis-ci.org/shenwei356/rush)
 [![Built with GoLang](https://img.shields.io/badge/powered_by-go-6362c2.svg?style=flat)](https://golang.org)
@@ -7,12 +7,16 @@
 [![Latest Version](https://img.shields.io/github/release/shenwei356/rush.svg?style=flat?maxAge=86400)](https://github.com/shenwei356/rush/releases)
 [![Github Releases](https://img.shields.io/github/downloads/shenwei356/rush/latest/total.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases)
 
-`rush` -- parallelly execute shell commands. A GNU parallel like tool in Go.
-
 `rush` is a tool similar to [GNU parallel](https://www.gnu.org/software/parallel/)
  and [gargs](https://github.com/brentp/gargs).
  `rush` borrows some idea from them and has some unique features,
-  e.g., more advanced embeded strings replacement than `parallel`.
+  e.g., 
+  supporting custom defined variables,
+  resuming multi-line commands,
+  more advanced embeded replacement strings. 
+These features make `rush` suitable for easily and flexibly parallelizing
+complex workflows in fields like Bioinformatics.
+
 
 ## Table of Contents
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
@@ -44,7 +48,7 @@ Major:
 - **Retry** (`-r`). (`--retry-failed --joblog` in GNU parallel)
 - **Safe exit after capturing Ctrl-C**
 - **Continue** (`-c`). (`--resume --joblog` in GNU parallel,
-  *but it does not support multi-line commands*)
+  ***but it does not support multi-line commands, which are common in workflow***)
 - **`awk -v` like custom defined variables** (`-v`). (***Not supported in GNU parallel***)
 - **Keeping output in order of input** (`-k`). (Same `-k/--keep-order` in GNU parallel)
 - **Exit on first error(s)** (`-e`). (***Not supported in GNU parallel***)
