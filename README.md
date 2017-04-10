@@ -13,9 +13,10 @@
   e.g., 
   supporting custom defined variables,
   resuming multi-line commands,
-  more advanced embeded replacement strings. 
+  more advanced embeded replacement strings.
+
 These features make `rush` suitable for easily and flexibly parallelizing
-complex workflows in fields like Bioinformatics.
+complex workflows in fields like Bioinformatics (see [examples](#examples) 17).
 
 
 ## Table of Contents
@@ -436,27 +437,28 @@ Flags:
 
         $ ref=ref/xxx.fa
         $ threads=25
-        $ ls -d raw.cluster.clean.mapping/* | rush -v ref=$ref -v j=$threads \
-            'bwa mem -t {j} -M -a {ref} {}/{%}_1.fq.gz {}/{%}_2.fq.gz > {}/{%}.sam; \
-            samtools view -bS {}/{%}.sam > {}/{%}.bam; \
-            samtools sort -T {}/{%}.tmp -@ {j} {}/{%}.bam -o {}/{%}.sorted.bam; \
-            samtools index {}/{%}.sorted.bam; \
-            samtools flagstat {}/{%}.sorted.bam > {}/{%}.sorted.bam.flagstat; \
-            /bin/rm {}/{%}.bam {}/{%}.sam;' \
-            -j 2 --verbose -c -C mapping.rush
+        $ ls -d raw.cluster.clean.mapping/* \
+            | rush -v ref=$ref -v j=$threads \
+                'bwa mem -t {j} -M -a {ref} {}/{%}_1.fq.gz {}/{%}_2.fq.gz > {}/{%}.sam; \
+                samtools view -bS {}/{%}.sam > {}/{%}.bam; \
+                samtools sort -T {}/{%}.tmp -@ {j} {}/{%}.bam -o {}/{%}.sorted.bam; \
+                samtools index {}/{%}.sorted.bam; \
+                samtools flagstat {}/{%}.sorted.bam > {}/{%}.sorted.bam.flagstat; \
+                /bin/rm {}/{%}.bam {}/{%}.sam;' \
+                -j 2 --verbose -c -C mapping.rush
 
     Since `{}/{%}` appears many times, we can use preset variable (macro) to
     simplify it:
 
-        $ ls -d raw.cluster.clean.mapping/* | rush -v ref=$ref -v j=$threads \
-            -v p='{}/{%}' \
-            'bwa mem -t {j} -M -a {ref} {p}_1.fq.gz {p}_2.fq.gz > {p}.sam; \
-            samtools view -bS {p}.sam > {p}.bam; \
-            samtools sort -T {p}.tmp -@ {j} {p}.bam -o {p}.sorted.bam; \
-            samtools index {p}.sorted.bam; \
-            samtools flagstat {p}.sorted.bam > {p}.sorted.bam.flagstat; \
-            /bin/rm {p}.bam {p}.sam;' \
-            -j 2 --verbose -c -C mapping.rush
+        $ ls -d raw.cluster.clean.mapping/* \
+            | rush -v ref=$ref -v j=$threads -v p='{}/{%}' \
+                'bwa mem -t {j} -M -a {ref} {p}_1.fq.gz {p}_2.fq.gz > {p}.sam; \
+                samtools view -bS {p}.sam > {p}.bam; \
+                samtools sort -T {p}.tmp -@ {j} {p}.bam -o {p}.sorted.bam; \
+                samtools index {p}.sorted.bam; \
+                samtools flagstat {p}.sorted.bam > {p}.sorted.bam.flagstat; \
+                /bin/rm {p}.bam {p}.sam;' \
+                -j 2 --verbose -c -C mapping.rush
 
 
 ## Special Cases
