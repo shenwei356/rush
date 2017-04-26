@@ -37,8 +37,8 @@ import (
 	"time"
 
 	"github.com/cznic/sortutil"
-	"github.com/op/go-logging"
 	"github.com/pkg/errors"
+	"github.com/shenwei356/go-logging"
 )
 
 // Log is *logging.Logger

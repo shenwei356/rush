@@ -21,16 +21,23 @@
 package main
 
 import (
+	"io"
 	"os"
+	"runtime"
 
-	"github.com/op/go-logging"
+	colorable "github.com/mattn/go-colorable"
+	"github.com/shenwei356/go-logging"
 )
 
 var log *logging.Logger
 
 func init() {
 	logFormat := logging.MustStringFormatter(`%{color}[%{level:.4s}]%{color:reset} %{message}`)
-	backend := logging.NewLogBackend(os.Stderr, "", 0)
+	var stderr io.Writer = os.Stderr
+	if runtime.GOOS == "windows" {
+		stderr = colorable.NewColorableStderr()
+	}
+	backend := logging.NewLogBackend(stderr, "", 0)
 	backendFormatter := logging.NewBackendFormatter(backend, logFormat)
 	logging.SetBackend(backendFormatter)
 	log = logging.MustGetLogger("rush")
