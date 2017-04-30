@@ -60,7 +60,7 @@ Homepage: https://github.com/shenwei356/rush
 			config.Infiles = append(config.Infiles, "-")
 		}
 		if len(config.Infiles) == 1 && isStdin(config.Infiles[0]) && !xopen.IsStdin() {
-			checkError(fmt.Errorf(`STDIN not detected. type "taxonkit -h" for help`))
+			checkError(fmt.Errorf(`STDIN not detected. type "rush -h" for help`))
 		}
 
 		if config.Version {
