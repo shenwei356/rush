@@ -33,6 +33,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/shenwei356/rush/process"
+	"github.com/shenwei356/xopen"
 	"github.com/spf13/cobra"
 )
 
@@ -54,6 +55,13 @@ Homepage: https://github.com/shenwei356/rush
 		process.Log = log
 		var err error
 		config := getConfigs(cmd)
+
+		if len(config.Infiles) == 0 {
+			config.Infiles = append(config.Infiles, "-")
+		}
+		if len(config.Infiles) == 1 && isStdin(config.Infiles[0]) && !xopen.IsStdin() {
+			checkError(fmt.Errorf(`STDIN not detected. type "taxonkit -h" for help`))
+		}
 
 		if config.Version {
 			checkVersion()
@@ -127,10 +135,6 @@ Homepage: https://github.com/shenwei356/rush
 			StopOnErr:           config.StopOnErr,
 			Verbose:             config.Verbose,
 			RecordSuccessfulCmd: config.Continue,
-		}
-
-		if len(config.Infiles) == 0 {
-			config.Infiles = append(config.Infiles, "-")
 		}
 
 		// split function for scanner
