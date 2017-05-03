@@ -59,13 +59,14 @@ Homepage: https://github.com/shenwei356/rush
 		if len(config.Infiles) == 0 {
 			config.Infiles = append(config.Infiles, "-")
 		}
-		if len(config.Infiles) == 1 && isStdin(config.Infiles[0]) && !xopen.IsStdin() {
-			checkError(fmt.Errorf(`STDIN not detected. type "rush -h" for help`))
-		}
 
 		if config.Version {
 			checkVersion()
 			return
+		}
+
+		if len(config.Infiles) == 1 && isStdin(config.Infiles[0]) && !xopen.IsStdin() {
+			checkError(fmt.Errorf(`STDIN not detected. type "rush -h" for help`))
 		}
 
 		j := config.Jobs + 1
