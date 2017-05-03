@@ -209,7 +209,8 @@ Homepage: https://github.com/shenwei356/rush
 					records = append(records, record)
 
 					if len(records) == n {
-						cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
+						cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
+						checkError(errors.Wrap(err, "fill command"))
 						if len(cmdStr) > 0 {
 							if config.Continue {
 								if _, runned = succCmds[cmdStr]; runned {
@@ -229,7 +230,8 @@ Homepage: https://github.com/shenwei356/rush
 					}
 				}
 				if len(records) > 0 {
-					cmdStr = fillCommand(config, command0, Chunk{ID: id, Data: records})
+					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
+					checkError(errors.Wrap(err, "fill command"))
 					if len(cmdStr) > 0 {
 						if config.Continue {
 							if _, runned = succCmds[cmdStr]; runned {
@@ -388,10 +390,12 @@ func init() {
   7. job ID, combine fields and other replacement strings
       $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
       job 1: file.txt file s
-  8. custom field delimiter
+  8. capture submatch using regular expression
+      $ echo read_1.fq.gz | rush 'echo {@(.+)_\d}'
+  9. custom field delimiter
       $ echo a=b=c | rush 'echo {1} {2} {3}' -d =
       a b c
-  9. custom record delimiter
+  10. custom record delimiter
       $ echo a=b=c | rush -D "=" -k 'echo {}'
       a
       b
@@ -400,14 +404,14 @@ func init() {
       a
       b
       c
-  10. assign value to variable, like "awk -v"
+  11. assign value to variable, like "awk -v"
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
-  11. preset variable
+  12. preset variable (Macro)
       # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
       $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
       read read_2.fq.gz
-  12. save successful commands to continue in NEXT run
+  13. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
       [INFO] ignore cmd #1: sleep 1; echo 1
       [ERRO] run cmd #1: sleep 2; echo 2: time out

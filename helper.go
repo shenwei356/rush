@@ -30,7 +30,7 @@ import (
 )
 
 // VERSION of this package
-const VERSION = "0.1.8"
+const VERSION = "0.1.9"
 
 func isStdin(file string) bool {
 	return file == "-"
@@ -46,7 +46,7 @@ func checkVersion() {
 		checkError(fmt.Errorf("Network error"))
 	}
 	items := strings.Split(resp.Request.URL.String(), "/")
-	version := ""
+	var version string
 	if items[len(items)-1] == "" {
 		version = items[len(items)-2]
 	} else {

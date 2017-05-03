@@ -10,7 +10,7 @@
 `rush` is a tool similar to [GNU parallel](https://www.gnu.org/software/parallel/)
  and [gargs](https://github.com/brentp/gargs).
  `rush` borrows some idea from them and has some unique features,
-  e.g., 
+  e.g.,
   supporting custom defined variables,
   resuming multi-line commands,
   more advanced embeded replacement strings.
@@ -66,6 +66,7 @@ Major:
         - `{.}`, remove the last extension. (Same in GNU parallel)
         - `{:}`, remove any extension (***Not supported in GNU parallel***)
         - `{^suffix}`, remove `suffix` (***Not supported in GNU parallel***)
+        - `{@regexp}`, capture submatch using regular expression (***Not supported in GNU parallel***)
     - Combinations (***Combinations of 3+ replacement strings not supported in GNU parallel***):
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
@@ -93,18 +94,18 @@ See on [release page](https://github.com/shenwei356/rush/releases).
 
 #### Method 1: Download binaries
 
-[rush v0.1.8](https://github.com/shenwei356/rush/releases/tag/v0.1.8)
-[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.1.8/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.1.7)
+[rush v0.1.9](https://github.com/shenwei356/rush/releases/tag/v0.1.9)
+[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.1.9/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.1.9)
 
 
 OS     |Arch      |File, (mirror为中国用户下载镜像链接)                                                                                                                                                                         |Download Count
 :------|:---------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_386.tar.gz)
-Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_linux_amd64.tar.gz)
-OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_386.tar.gz))                         |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_386.tar.gz)
-OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_darwin_amd64.tar.gz)
-Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_386.exe.tar.gz)
-Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.8/rush_windows_amd64.exe.tar.gz)
+Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_linux_386.tar.gz)
+Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_linux_amd64.tar.gz)
+OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_darwin_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_386.tar.gz))                         |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_darwin_386.tar.gz)
+OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_darwin_amd64.tar.gz)
+Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_windows_386.exe.tar.gz)
+Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.1.9/rush_windows_amd64.exe.tar.gz)
 
 
 Just [download](https://github.com/shenwei356/rush/releases) compressed
@@ -136,7 +137,7 @@ And then:
 ```
 rush -- parallelly execute shell commands
 
-Version: 0.1.8
+Version: 0.1.9
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -180,7 +181,7 @@ Examples:
       Hello, Wei Shen!
   11. preset variable
       # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
-      $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
+      $ echo read_1.fq.gz | rush -v p={:^_1} 'echo {p} {p}_2.fq.gz'
       read read_2.fq.gz
   12. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
@@ -269,6 +270,10 @@ Flags:
         $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
         job 1: file.txt file s
 
+1. Capture submatch using regular expression (`{@regexp}`)
+
+        $ echo read_1.fq.gz | rush 'echo {@(.+)_\d}'
+
 1. Custom field delimiter (`-d`)
 
         $ echo a=b=c | rush 'echo {1} {2} {3}' -d =
@@ -343,9 +348,15 @@ Flags:
 
 1. **Preset variable** (`-v`), avoid repeatedly writing verbose replacement strings
 
-        # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
-        $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
+        # naive way
+        $ echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
         read read_2.fq.gz
+
+        # macro + removing suffix
+        $ echo read_1.fq.gz | rush -v p='{:^_1}' 'echo {p} {p}_2.fq.gz'
+
+        # macro + regular expression
+        $ echo read_1.fq.gz | rush -v p='{@(.+?)_\d}' 'echo {p} {p}_2.fq.gz'
 
 1. Interrupt jobs by `Ctrl-C`, rush will stop unfinished commands and exit.
 

@@ -33,10 +33,10 @@ var rePlaceHolder = regexp.MustCompile(`\{([^\}]*)\}`)
 var reChars = regexp.MustCompile(`\d+|.`)
 var reCharsCheck = regexp.MustCompile(`^(\d+)*.*$`)
 
-func fillCommand(config Config, command string, chunk Chunk) string {
+func fillCommand(config Config, command string, chunk Chunk) (string, error) {
 	founds := rePlaceHolder.FindAllStringSubmatchIndex(command, -1)
 	if len(founds) == 0 {
-		return command
+		return command, nil
 	}
 
 	records := make([]string, len(chunk.Data))
@@ -56,7 +56,7 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 	fieldsStr := strings.Join(records, config.RecordsJoinSeparator)
 
 	if fieldsStr == "" || fieldsStr == "\n" || fieldsStr == "\r\n" || fieldsStr == "\r" {
-		return ""
+		return "", nil
 	}
 
 	var fields []string
@@ -105,6 +105,7 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 
 				var x, y int
 				var rmSuffix bool
+				var captureGroup bool
 				var td, tb string
 			LOOP:
 				for x, char = range charsGroups[i:] {
@@ -138,6 +139,9 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 					case "^": // remove suffix
 						rmSuffix = true
 						break LOOP
+					case "@": // capturing group
+						captureGroup = true
+						break LOOP
 					default:
 						target = fmt.Sprintf("{%s}", chars)
 						break LOOP
@@ -147,6 +151,24 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 					y = strings.LastIndex(target, strings.Join(charsGroups[i:][x+1:], ""))
 					if y >= 0 {
 						target = target[0:y]
+					}
+				}
+				if captureGroup {
+					if len(charsGroups[i:]) == 1 {
+						target = target
+						continue
+					}
+					re, err := regexp.Compile(strings.Join(charsGroups[i:][x+1:], ""))
+					if err != nil {
+						return "", err
+					}
+					groups := re.FindStringSubmatch(target)
+					if len(groups) == 0 {
+						target = target
+					} else if len(groups) == 1 {
+						target = groups[0]
+					} else {
+						target = groups[1]
 					}
 				}
 			}
@@ -159,7 +181,7 @@ func fillCommand(config Config, command string, chunk Chunk) string {
 	buf.WriteString(command[j:])
 
 	if !config.Greedy || config.GreedyCount <= 0 {
-		return buf.String()
+		return buf.String(), nil
 	}
 	config.GreedyCount--
 	return fillCommand(config, buf.String(), chunk)
