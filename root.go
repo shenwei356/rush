@@ -392,6 +392,7 @@ func init() {
       job 1: file.txt file s
   8. capture submatch using regular expression
       $ echo read_1.fq.gz | rush 'echo {@(.+)_\d}'
+      read
   9. custom field delimiter
       $ echo a=b=c | rush 'echo {1} {2} {3}' -d =
       a b c
