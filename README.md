@@ -97,6 +97,7 @@ See on [release page](https://github.com/shenwei356/rush/releases).
 [rush v0.1.9](https://github.com/shenwei356/rush/releases/tag/v0.1.9)
 [![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.1.9/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.1.9)
 
+***Tip: run `rush -V` to check update !!!***
 
 OS     |Arch      |File, (mirror为中国用户下载镜像链接)                                                                                                                                                                         |Download Count
 :------|:---------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
