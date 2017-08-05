@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 # https://github.com/mitchellh/gox
-gox -os="windows darwin linux" -arch="386 amd64";
+CGO_ENABLED=0 gox -os="windows darwin linux" -arch="386 amd64" -tags netgo -ldflags '-w -s'
 
 dir=binaries
 mkdir -p $dir;
