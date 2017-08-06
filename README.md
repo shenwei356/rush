@@ -50,11 +50,11 @@ Major:
 - **Safe exit after capturing Ctrl-C**
 - **Continue** (`-c`). (`--resume --joblog` in GNU parallel,
   ***but it does not support multi-line commands, which are common in workflow***)
-- **`awk -v` like custom defined variables** (`-v`). (***Not supported in GNU parallel***)
+- **`awk -v` like custom defined variables** (`-v`). (***Using Shell variable in GNU parallel***)
 - **Keeping output in order of input** (`-k`). (Same `-k/--keep-order` in GNU parallel)
-- **Exit on first error(s)** (`-e`). (***Not supported in GNU parallel***)
+- **Exit on first error(s)** (`-e`). (`--halt 2` in GNU parallel)
 - **Settable record delimiter** (`-D`, default `\n`). (`--recstart` and `--recend` in GNU parallel)
-- **Settable records sending to every command** (`-n`, default `1`). (***Not supported in GNU parallel***)
+- **Settable records sending to every command** (`-n`, default `1`). (`-n/--max-args` in GNU parallel)
 - **Settable field delimiter** (`-d`, default `\s+`). (Same `-d/--delimiter` in GNU parallel)
 - **Practical replacement strings** (like GNU parallel):
     - `{#}`, job ID. (Same in GNU parallel)
@@ -67,11 +67,11 @@ Major:
         - `{:}`, remove any extension (***Not supported in GNU parallel***)
         - `{^suffix}`, remove `suffix` (***Not supported in GNU parallel***)
         - `{@regexp}`, capture submatch using regular expression (***Not supported in GNU parallel***)
-    - Combinations (***Combinations of 3+ replacement strings not supported in GNU parallel***):
+    - Combinations
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
 - **Preset variable (macro)**, e.g., `rush -v p={^suffix} 'echo {p}_new_suffix'`,
-where `{p}` is replaced with `{^suffix}`. (***Not supported in GNU parallel***)
+where `{p}` is replaced with `{^suffix}`. (***Using Shell variable in GNU parallel***)
 
 Minor:
 
@@ -79,11 +79,13 @@ Minor:
 - Trim input data (`--trim`). (Same in GNU parallel)
 - Verbose output (`--verbose`). (Same in GNU parallel)
 
+[Differences between rush and GNU parallel](https://www.gnu.org/software/parallel/parallel_alternatives.html#DIFFERENCES-BETWEEN-Rush-AND-GNU-Parallel) on GNU parallel site.
 
 ## Performance
 
-Performance of `rush` is similar to `gargs`, and they are both slightly faster than `parallel` (Perl).
-See on [release page](https://github.com/shenwei356/rush/releases).
+Performance of `rush` is similar to `gargs`, and they are both slightly faster than `parallel` (Perl) and both slower than `Rust parallel` ([discussion](https://github.com/shenwei356/rush/issues/1)).
+
+Note that speed is not the #.1 target, especially for processes that last long. 
 
 
 ## Installation
