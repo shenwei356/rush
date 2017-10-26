@@ -91,7 +91,7 @@ func (c *Command) String() string {
 	return fmt.Sprintf("cmd #%d: %s", c.ID, c.Cmd)
 }
 
-// Verbose decide whether print extra information
+// Verbose decides whether print extra information
 var Verbose bool
 
 var tmpfilePrefix = fmt.Sprintf("rush.%d.", os.Getpid())
@@ -222,9 +222,9 @@ func (c *Command) Cleanup() error {
 	}
 
 	if c.tmpfile != "" {
-		// if Verbose {
-		// 	Log.Infof("remove tmpfile of command: %s", c.Cmd)
-		// }
+		if Verbose {
+			Log.Infof("remove tmpfile (%s) for command: %s", c.tmpfile, c.Cmd)
+		}
 		err = os.Remove(c.tmpfile)
 	}
 	return err
@@ -371,16 +371,16 @@ func (c *Command) run() error {
 		return errors.Wrapf(err, "run cmd #%d: %s", c.ID, c.Cmd)
 	}
 
-	// if Verbose {
-	// 	Log.Infof("create tmpfile for command: %s", c.Cmd)
-	// }
-
 	c.tmpfh, err = ioutil.TempFile("", tmpfilePrefix)
 	if err != nil {
 		return errors.Wrapf(err, "create tmpfile for cmd #%d: %s", c.ID, c.Cmd)
 	}
 
 	c.tmpfile = c.tmpfh.Name()
+
+	if Verbose {
+		Log.Infof("create tmpfile (%s) for command: %s", c.tmpfile, c.Cmd)
+	}
 
 	btmp := bufio.NewWriter(c.tmpfh)
 	_, err = io.CopyBuffer(btmp, bpipe, readed)
@@ -508,7 +508,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 
 					id++
 				} else { // wait the ID come out
-					for true {
+					for {
 						if c1, ok = cmds[id]; ok {
 							for msg := range c1.Ch {
 								chOut <- msg
