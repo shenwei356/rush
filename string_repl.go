@@ -155,7 +155,6 @@ func fillCommand(config Config, command string, chunk Chunk) (string, error) {
 				}
 				if captureGroup {
 					if len(charsGroups[i:]) == 1 {
-						target = target
 						continue
 					}
 					re, err := regexp.Compile(strings.Join(charsGroups[i:][x+1:], ""))
@@ -164,7 +163,6 @@ func fillCommand(config Config, command string, chunk Chunk) (string, error) {
 					}
 					groups := re.FindStringSubmatch(target)
 					if len(groups) == 0 {
-						target = target
 					} else if len(groups) == 1 {
 						target = groups[0]
 					} else {

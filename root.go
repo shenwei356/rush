@@ -33,6 +33,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/shenwei356/rush/process"
+	"github.com/shenwei356/util/stringutil"
 	"github.com/shenwei356/xopen"
 	"github.com/spf13/cobra"
 )
@@ -210,7 +211,13 @@ Homepage: https://github.com/shenwei356/rush
 					records = append(records, record)
 
 					if len(records) == n {
-						cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
+						if config.Escape {
+							cmdStr, err = fillCommand(config,
+								stringutil.EscapeSymbols(command0, config.EscapeSymbols),
+								Chunk{ID: id, Data: records})
+						} else {
+							cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
+						}
 						checkError(errors.Wrap(err, "fill command"))
 						if len(cmdStr) > 0 {
 							if config.Continue {
@@ -231,7 +238,13 @@ Homepage: https://github.com/shenwei356/rush
 					}
 				}
 				if len(records) > 0 {
-					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
+					if config.Escape {
+						cmdStr, err = fillCommand(config,
+							stringutil.EscapeSymbols(command0, config.EscapeSymbols),
+							Chunk{ID: id, Data: records})
+					} else {
+						cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
+					}
 					checkError(errors.Wrap(err, "fill command"))
 					if len(cmdStr) > 0 {
 						if config.Continue {
@@ -374,6 +387,9 @@ func init() {
 	RootCmd.Flags().StringP("trim", "T", "", `trim white space (" \t\r\n") in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)`)
 	// RootCmd.Flags().BoolP("greedy", "g", false, `greedy replacement strings (replace again), useful for preset variable, e.g., rush -v p={:^_1} 'echo {p}'`)
 
+	RootCmd.Flags().BoolP("escape", "q", false, `escape special symbols like $ which you can customize by flag -Q/--escape-symbols`)
+	RootCmd.Flags().StringP("escape-symbols", "Q", "$#&`", "symbols to escape")
+
 	RootCmd.Example = `  1. simple run, quoting is not necessary
       $ seq 1 10 | rush echo {}
   2. keep order
@@ -407,6 +423,7 @@ func init() {
       b
       c
   11. assign value to variable, like "awk -v"
+      # seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei,lname=Shen
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
   12. preset variable (Macro)
@@ -418,6 +435,9 @@ func init() {
       [INFO] ignore cmd #1: sleep 1; echo 1
       [ERRO] run cmd #1: sleep 2; echo 2: time out
       [ERRO] run cmd #2: sleep 3; echo 3: time out
+  14. escape special symbols
+      $ seq 1 | rush 'echo -e "a\tb" | awk "{print $1}"' -q
+      a
 
   More examples: https://github.com/shenwei356/rush`
 
@@ -479,6 +499,9 @@ type Config struct {
 	Trim        string
 	Greedy      bool
 	GreedyCount int
+
+	Escape        bool
+	EscapeSymbols string
 }
 
 // var=value
@@ -541,5 +564,8 @@ func getConfigs(cmd *cobra.Command) Config {
 		AssignMap:   assignMap,
 		Greedy:      true, // getFlagBool(cmd, "greedy"),
 		GreedyCount: 1,
+
+		Escape:        getFlagBool(cmd, "escape"),
+		EscapeSymbols: getFlagString(cmd, "escape-symbols"),
 	}
 }
