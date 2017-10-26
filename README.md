@@ -140,7 +140,7 @@ And then:
 ```
 rush -- a cross-platform command-line tool for executing jobs in parallel
 
-Version: 0.1.9
+Version: 0.2.0
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -183,6 +183,7 @@ Examples:
       b
       c
   11. assign value to variable, like "awk -v"
+      # seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei,lname=Shen
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
   12. preset variable (Macro)
@@ -194,15 +195,21 @@ Examples:
       [INFO] ignore cmd #1: sleep 1; echo 1
       [ERRO] run cmd #1: sleep 2; echo 2: time out
       [ERRO] run cmd #2: sleep 3; echo 3: time out
+  14. escape special symbols
+      $ seq 1 | rush 'echo -e "a\tb" | awk "{print $1}"' -q
+      a
 
   More examples: https://github.com/shenwei356/rush
 
 Flags:
-  -v, --assign stringSlice        assign the value val to the variable var (format: var=val, val also supports replacement strings)
+  -v, --assign strings            assign the value val to the variable var (format: var=val, val also supports replacement strings)
   -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves data so we can continue jobs next time; 3) if the file exists, rush ignores jobs in it and update the file
       --dry-run                   print command but not run
+  -q, --escape                    escape special symbols like $ which you can customize by flag -Q/--escape-symbols
+  -Q, --escape-symbols string     symbols to escape (default "$#&`")
   -d, --field-delimiter string    field delimiter in records, support regular expression (default "\\s+")
-  -i, --infile stringSlice        input data file, multi-values supported
+  -h, --help                      help for rush
+  -i, --infile strings            input data file, multi-values supported
   -j, --jobs int                  run n jobs in parallel (default value depends on your device) (default 4)
   -k, --keep-order                keep output in order of input
   -n, --nrecords int              number of records sent to a command (default 1)
@@ -365,7 +372,7 @@ Flags:
         # macro + regular expression
         $ echo read_1.fq.gz | rush -v p='{@(.+?)_\d}' 'echo {p} {p}_2.fq.gz'
 
-1. escape special symbols
+1. Escape special symbols
 
         $ seq 1 | rush 'echo "I have $100"'
         I have 00
