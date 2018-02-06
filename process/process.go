@@ -30,7 +30,8 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"sort"
+    "sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,6 +40,7 @@ import (
 	"github.com/cznic/sortutil"
 	"github.com/pkg/errors"
 	"github.com/shenwei356/go-logging"
+	psutil "github.com/shirou/gopsutil/process"
 )
 
 // Log is *logging.Logger
@@ -74,6 +76,7 @@ type Command struct {
 	Duration time.Duration // runtime
 
 	dryrun bool
+	exitStatus int
 }
 
 // NewCommand create a Command
@@ -104,20 +107,22 @@ var TmpOutputDataBuffer = 1048576 // 1M
 var OutputChunkSize = 16384 // 16K
 
 // Run runs a command and send output to command.Ch in background.
-func (c *Command) Run() error {
-	c.Ch = make(chan string, 1)
+func (c *Command) Run(opts *Options) (chan string, error) {
+	// create a return chan here; we will set the c.Ch in the parent
+	ch := make(chan string, 1)
 
 	if c.dryrun {
-		c.Ch <- c.Cmd + "\n"
-		close(c.Ch)
+		ch <- c.Cmd + "\n"
+		close(ch)
 		c.finishSendOutput = true
-		return nil
+		return ch, nil
 	}
 
-	c.Err = c.run()
-	if c.Err != nil {
-		return c.Err
-	}
+	c.Err = c.run(opts)
+
+	// don't return here, keep going so we can display
+	// the output from commands that error
+	var readErr error = nil
 
 	if Verbose {
 		Log.Infof("finish cmd #%d in %s: %s", c.ID, c.Duration, c.Cmd)
@@ -136,21 +141,21 @@ func (c *Command) Run() error {
 		var existedN int
 		// var N uint64
 		for {
-			n, c.Err = c.reader.Read(buf)
+			n, readErr = c.reader.Read(buf)
 
 			existedN = b.Len()
 			b.Write(buf[0:n])
 
-			if c.Err != nil {
-				if c.Err == io.EOF {
+			if readErr != nil {
+				if readErr == io.EOF {
 					if b.Len() > 0 {
 						// if Verbose {
 						// 	N += uint64(b.Len())
 						// }
-						c.Ch <- b.String() // string(buf[0:n])
+						ch <- b.String() // string(buf[0:n])
 					}
 					b.Reset()
-					c.Err = nil
+					readErr = nil
 				}
 				break
 			}
@@ -164,7 +169,7 @@ func (c *Command) Run() error {
 			// if Verbose {
 			// 	N += uint64(len(bb[0 : i+1]))
 			// }
-			c.Ch <- string(bb[0 : i+1]) // string(buf[0:n])
+			ch <- string(bb[0 : i+1]) // string(buf[0:n])
 
 			b.Reset()
 			if i-existedN+1 < n {
@@ -184,10 +189,18 @@ func (c *Command) Run() error {
 		// 	Log.Infof("finish reading data from: %s", c.Cmd)
 		// }
 
-		close(c.Ch)
+		close(ch)
 		c.finishSendOutput = true
 	}()
-	return nil
+	if c.Err != nil {
+		return ch, c.Err
+	} else {
+		if readErr != nil {
+			return ch, readErr
+		} else {
+			return ch, nil
+		}
+	}
 }
 
 var isWindows bool = runtime.GOOS == "windows"
@@ -230,29 +243,66 @@ func (c *Command) Cleanup() error {
 	return err
 }
 
-// ExitCode returns the exit code associated with a given error
-func (c *Command) ExitCode() int {
-	if c.Err == nil {
-		return 0
-	}
-	if ex, ok := c.Err.(*exec.ExitError); ok {
-		if st, ok := ex.Sys().(syscall.WaitStatus); ok {
-			return st.ExitStatus()
-		}
-	}
-	return 1
-}
-
 // ErrTimeout means command timeout
 var ErrTimeout = fmt.Errorf("time out")
 
 // ErrCancelled means command being cancelled
 var ErrCancelled = fmt.Errorf("cancelled")
 
+func (c *Command) getExitStatus(err error) int {
+	if exitError, ok := err.(*exec.ExitError); ok {
+		waitStatus := exitError.Sys().(syscall.WaitStatus)
+		return waitStatus.ExitStatus()
+	}
+	// no error, so return exitStatus 0
+	return 0
+}
+
+func isProcessRunning(pid int) bool {
+	_, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+// ensure Windows processes go away
+func killWindowsProcessTreeRecursive(childProcess *psutil.Process) {
+	grandChildren, err := childProcess.Children()
+	if grandChildren != nil && err == nil {
+		for _, value := range grandChildren {
+			killWindowsProcessTreeRecursive(value)
+		}
+	}
+	attempts := 1
+	for {
+		if Verbose {
+			Log.Infof("taskkill /t /f /pid %s", strconv.Itoa(int(childProcess.Pid)))
+		}
+		out, err := exec.Command("taskkill", "/t", "/f", "/pid", strconv.Itoa(int(childProcess.Pid))).Output()
+		if Verbose {
+			if err != nil {
+				Log.Error(err)
+			}
+			Log.Infof("%s", out)
+		}
+		
+		if !isProcessRunning(int(childProcess.Pid)) {
+			break
+		} else {
+			time.Sleep(10 * time.Millisecond)
+			attempts += 1
+			if attempts > 30 {
+				break
+			}
+		}
+	}
+}
+
 // run a command and pass output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
-func (c *Command) run() error {
+func (c *Command) run(opts *Options) error {
 	t := time.Now()
 	chCancelMonitor := make(chan struct{})
 	defer func() {
@@ -269,18 +319,20 @@ func (c *Command) run() error {
 	if c.Timeout > 0 {
 		c.ctx, c.ctxCancel = context.WithTimeout(context.Background(), c.Timeout)
 		if isWindows {
-			command = exec.CommandContext(c.ctx, getShell(), "/c", qcmd)
+			command = exec.CommandContext(c.ctx, getShell())
+			c.setWindowsCommandAttr(command, qcmd)
 		} else {
 			command = exec.CommandContext(c.ctx, getShell(), "-c", qcmd)
 		}
 	} else {
 		if isWindows {
-			command = exec.Command(getShell(), "/c", qcmd)
+			command = exec.Command(getShell())
+			c.setWindowsCommandAttr(command, qcmd)
 		} else {
 			command = exec.Command(getShell(), "-c", qcmd)
 		}
 	}
-
+    
 	pipeStdout, err := command.StdoutPipe()
 	if err != nil {
 		return errors.Wrapf(err, "get stdout pipe of cmd #%d: %s", c.ID, c.Cmd)
@@ -306,7 +358,17 @@ func (c *Command) run() error {
 				Log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
 			}
 			chErr <- ErrCancelled
-			command.Process.Kill()
+			if opts.KillOnCtrlC {
+				if isWindows {
+					childProcess, err := psutil.NewProcess(int32(command.Process.Pid))
+					if err != nil {
+						Log.Error(err)
+					}
+					killWindowsProcessTreeRecursive(childProcess)
+				} else {
+					command.Process.Kill()
+				}
+			}
 		case <-chCancelMonitor:
 			// default:  // must not use default, if you must use, use for loop
 		}
@@ -359,10 +421,14 @@ func (c *Command) run() error {
 			err = command.Wait()
 		}
 
+		if opts.PropExitStatus {
+			c.exitStatus = c.getExitStatus(err)
+		}
+		// get reader even on error, so we can still print the stdout and stderr of the failed child process
+		c.reader = bufio.NewReader(bytes.NewReader(readed))
 		if err != nil {
 			return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 		}
-		c.reader = bufio.NewReader(bytes.NewReader(readed))
 		return nil
 	}
 
@@ -406,6 +472,9 @@ func (c *Command) run() error {
 			err = command.Wait()
 		}
 	}
+	if opts.PropExitStatus {
+		c.exitStatus = c.getExitStatus(err)
+	}
 	if err != nil {
 		return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 	}
@@ -420,8 +489,11 @@ type Options struct {
 	KeepOrder           bool          // keep output order
 	Retries             int           // max retry chances
 	RetryInterval       time.Duration // retry interval
+	PrintRetryOutput    bool          // print output from retries
 	Timeout             time.Duration // timeout
 	StopOnErr           bool          // stop on any error
+	PropExitStatus      bool          // propagate child exit status
+	KillOnCtrlC         bool          // kill child processes on ctrl-c
 	RecordSuccessfulCmd bool          // send successful command to channel
 	Verbose             bool
 }
@@ -429,14 +501,14 @@ type Options struct {
 // Run4Output runs commands in parallel from channel chCmdStr,
 // and returns an output text channel,
 // and a done channel to ensure safe exit.
-func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan string, chan string, chan int) {
+func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan string, chan string, chan int, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
-	chCmd, chSuccessfulCmd, doneChCmd := Run(opts, cancel, chCmdStr)
+	chCmd, chSuccessfulCmd, doneChCmd, chExitStatus := Run(opts, cancel, chCmdStr)
 	chOut := make(chan string, opts.Jobs)
 	done := make(chan int)
-
+    
 	go func() {
 		var wg sync.WaitGroup
 
@@ -543,7 +615,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 
 			wg.Done()
 		}
-
+        
 		<-doneChCmd
 		wg.Wait()
 		close(chOut)
@@ -553,13 +625,34 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 		// }
 		done <- 1
 	}()
-	return chOut, chSuccessfulCmd, done
+	return chOut, chSuccessfulCmd, done, chExitStatus
+}
+
+// write strings and report done
+func combineWorker(input <-chan string, output chan<- string, wg *sync.WaitGroup) {
+    defer wg.Done()
+	for val := range input {
+		output <- val
+	}
+}
+
+// combine strings in input order
+func combine(inputs []<-chan string, output chan<- string) {
+	group := new(sync.WaitGroup)
+	go func() {
+		for _, input := range inputs {
+			group.Add(1)
+			go combineWorker(input, output, group)
+			group.Wait()  // preserve input order
+		}
+		close(output)
+	}()
 }
 
 // Run runs commands in parallel from channel chCmdStr，
 // and returns a Command channel,
 // and a done channel to ensure safe exit.
-func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Command, chan string, chan int) {
+func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Command, chan string, chan int, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
@@ -570,6 +663,10 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		chSuccessfulCmd = make(chan string, opts.Jobs)
 	}
 	done := make(chan int)
+	var chExitStatus chan int
+	if opts.PropExitStatus {
+		chExitStatus = make(chan int)
+	}
 
 	go func() {
 		var wg sync.WaitGroup
@@ -607,11 +704,20 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 				}
 
 				chances := opts.Retries
+				var outputsToPrint []<-chan string
 				for {
-					err := command.Run()
+					ch, err := command.Run(opts)
 					if err != nil { // fail to run
-						if chances == 0 || opts.StopOnErr {
+                        if chances == 0 || opts.StopOnErr {
+							// print final output
+							outputsToPrint = append(outputsToPrint, ch)
 							Log.Error(err)
+							if opts.PropExitStatus {
+								chExitStatus <- command.exitStatus
+							}
+							command.Ch = make(chan string, 1)
+							combine(outputsToPrint, command.Ch)
+							chCmd <- command
 						} else {
 							Log.Warning(err)
 						}
@@ -626,6 +732,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 								if opts.RecordSuccessfulCmd {
 									close(chSuccessfulCmd)
 								}
+								if opts.PropExitStatus {
+									close(chExitStatus)
+								}
 								done <- 1
 							}
 
@@ -633,6 +742,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 							return
 						}
 						if chances > 0 {
+							if opts.PrintRetryOutput {
+								outputsToPrint = append(outputsToPrint, ch)
+							}
 							if Verbose && opts.Retries > 0 {
 								Log.Warningf("retry %d/%d times: %s",
 									opts.Retries-chances+1,
@@ -644,9 +756,16 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 						}
 						return
 					}
+					// print final output
+					outputsToPrint = append(outputsToPrint, ch)
+					if opts.PropExitStatus {
+						chExitStatus <- command.exitStatus
+					}
 					break
 				}
 
+				command.Ch = make(chan string, 1)
+				combine(outputsToPrint, command.Ch)
 				chCmd <- command
 				if opts.RecordSuccessfulCmd {
 					chSuccessfulCmd <- cmdStr
@@ -663,7 +782,10 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 			}
 		}
 
+		if opts.PropExitStatus {
+			close(chExitStatus)
+		}
 		done <- 1
 	}()
-	return chCmd, chSuccessfulCmd, done
+	return chCmd, chSuccessfulCmd, done, chExitStatus
 }
