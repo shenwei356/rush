@@ -258,18 +258,6 @@ func (c *Command) getExitStatus(err error) int {
 	return 0
 }
 
-// On Windows, call shell with /s to allow correct interpretation of quotes
-// from https://github.com/junegunn/fzf/blob/390b49653b441c958b82a0f78d9923aef4c1d9a2/src/util/util_windows.go
-func (c *Command) setWindowsCommandAttr(command *exec.Cmd, qcmd string) {
-	if isWindows {
-		command.SysProcAttr = &syscall.SysProcAttr{
-			HideWindow:    false,
-			CmdLine:       fmt.Sprintf(` /s /c "%s"`, qcmd),
-			CreationFlags: 0,
-		}
-	}
-}
-
 func isProcessRunning(pid int) bool {
 	_, err := os.FindProcess(pid)
 	if err != nil {
