@@ -1,4 +1,4 @@
-// +build windows
+// +build !windows
 
 // Copyright © 2017 Wei Shen <shenwei356@gmail.com>
 //
@@ -23,20 +23,13 @@
 package process
 
 import (
-	"fmt"
 	"os/exec"
-	"syscall"
 )
 
-// from https://github.com/junegunn/fzf/blob/390b49653b441c958b82a0f78d9923aef4c1d9a2/src/util/util_windows.go
 func (c *Command) setWindowsCommandAttr(command *exec.Cmd, qcmd string) {
 	if isWindows {
-		command.SysProcAttr = &syscall.SysProcAttr{
-			HideWindow:    false,
-			CmdLine:       fmt.Sprintf(` /s /c "%s"`, qcmd),
-			CreationFlags: 0,
-		}
-	} else{
-		panic("should have called process_others.go setWindowsCommandAttr()!")
+		panic("should have called process_windows.go setWindowsCommandAttr()!")
+	} else {
+		// noop for all platforms except windows
 	}
 }
