@@ -141,7 +141,12 @@ func (c *Command) Run(opts *Options) (chan string, error) {
 		var existedN int
 		// var N uint64
 		for {
-			n, readErr = c.reader.Read(buf)
+			if c.reader != nil {
+				n, readErr = c.reader.Read(buf)
+			} else {
+				n = 0
+				readErr = io.EOF
+			}
 
 			existedN = b.Len()
 			b.Write(buf[0:n])
