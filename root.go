@@ -170,6 +170,8 @@ Homepage: https://github.com/shenwei356/rush
 		// channel of command
 		chCmdStr := make(chan string, config.Jobs)
 
+		anyCommands := false
+
 		// read data and generate command
 		go func() {
 			n := config.NRecords
@@ -230,9 +232,11 @@ Homepage: https://github.com/shenwei356/rush
 									bfhSuccCmds.Flush()
 								} else {
 									chCmdStr <- cmdStr
+									anyCommands = true
 								}
 							} else {
 								chCmdStr <- cmdStr
+								anyCommands = true
 							}
 
 							id++
@@ -257,9 +261,11 @@ Homepage: https://github.com/shenwei356/rush
 								bfhSuccCmds.Flush()
 							} else {
 								chCmdStr <- cmdStr
+								anyCommands = true
 							}
 						} else {
 							chCmdStr <- cmdStr
+							anyCommands = true
 						}
 					}
 				}
@@ -372,10 +378,12 @@ Homepage: https://github.com/shenwei356/rush
 		<-cleanupDone
 
 		if config.PropExitStatus {
-			if pToolExitStatus != nil {
-				os.Exit(*pToolExitStatus)
-			} else {
-				checkError(fmt.Errorf(`did not get an exit status int from any child process)`))
+			if anyCommands {
+				if pToolExitStatus != nil {
+					os.Exit(*pToolExitStatus)
+				} else {
+					checkError(fmt.Errorf(`did not get an exit status int from any child process)`))
+				}
 			}
 		}
 	},
