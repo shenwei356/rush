@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bburgin/rush/process"
 	"github.com/pkg/errors"
-	"github.com/shenwei356/rush/process"
 	"github.com/shenwei356/util/stringutil"
 	"github.com/shenwei356/xopen"
 	"github.com/spf13/cobra"
@@ -276,7 +276,7 @@ Homepage: https://github.com/shenwei356/rush
 		// ---------------------------------------------------------------
 
 		// run
-		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus  := process.Run4Output(opts, cancel, chCmdStr)
+		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4Output(opts, cancel, chCmdStr)
 
 		// read from chOutput and print
 		doneOutput := make(chan int)
@@ -357,7 +357,7 @@ Homepage: https://github.com/shenwei356/rush
 			}
 		}()
 
-			// the order is very important!
+		// the order is very important!
 		<-donePreprocessFiles // finish read data and send command
 		<-doneSendOutput      // finish send output
 		<-doneOutput          // finish print output
@@ -530,16 +530,16 @@ type Config struct {
 	FieldDelimiter       string
 	reFieldDelimiter     *regexp.Regexp
 
-	Retries       int
-	RetryInterval int
+	Retries          int
+	RetryInterval    int
 	PrintRetryOutput bool
-	Timeout       int
+	Timeout          int
 
-	KeepOrder bool
-	StopOnErr bool
+	KeepOrder      bool
+	StopOnErr      bool
 	PropExitStatus bool
-	KillOnCtrlC bool
-	DryRun     bool
+	KillOnCtrlC    bool
+	DryRun         bool
 
 	Continue    bool
 	SuccCmdFile string
