@@ -36,7 +36,7 @@ func (c *Command) setWindowsCommandAttr(command *exec.Cmd, qcmd string) {
 			CmdLine:       fmt.Sprintf(` /s /c "%s"`, qcmd),
 			CreationFlags: 0,
 		}
-	} else{
+	} else {
 		panic("should have called process_others.go setWindowsCommandAttr()!")
 	}
 }

@@ -30,7 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-    "sort"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -75,7 +75,7 @@ type Command struct {
 	Err      error         // Error
 	Duration time.Duration // runtime
 
-	dryrun bool
+	dryrun     bool
 	exitStatus int
 }
 
@@ -291,7 +291,7 @@ func killWindowsProcessTreeRecursive(childProcess *psutil.Process) {
 			}
 			Log.Infof("%s", out)
 		}
-		
+
 		if !isProcessRunning(int(childProcess.Pid)) {
 			break
 		} else {
@@ -337,7 +337,7 @@ func (c *Command) run(opts *Options) error {
 			command = exec.Command(getShell(), "-c", qcmd)
 		}
 	}
-    
+
 	pipeStdout, err := command.StdoutPipe()
 	if err != nil {
 		return errors.Wrapf(err, "get stdout pipe of cmd #%d: %s", c.ID, c.Cmd)
@@ -513,7 +513,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 	chCmd, chSuccessfulCmd, doneChCmd, chExitStatus := Run(opts, cancel, chCmdStr)
 	chOut := make(chan string, opts.Jobs)
 	done := make(chan int)
-    
+
 	go func() {
 		var wg sync.WaitGroup
 
@@ -620,7 +620,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 
 			wg.Done()
 		}
-        
+
 		<-doneChCmd
 		wg.Wait()
 		close(chOut)
@@ -635,7 +635,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 
 // write strings and report done
 func combineWorker(input <-chan string, output chan<- string, wg *sync.WaitGroup) {
-    defer wg.Done()
+	defer wg.Done()
 	for val := range input {
 		output <- val
 	}
@@ -648,7 +648,7 @@ func combine(inputs []<-chan string, output chan<- string) {
 		for _, input := range inputs {
 			group.Add(1)
 			go combineWorker(input, output, group)
-			group.Wait()  // preserve input order
+			group.Wait() // preserve input order
 		}
 		close(output)
 	}()
@@ -713,7 +713,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 				for {
 					ch, err := command.Run(opts)
 					if err != nil { // fail to run
-                        if chances == 0 || opts.StopOnErr {
+						if chances == 0 || opts.StopOnErr {
 							// print final output
 							outputsToPrint = append(outputsToPrint, ch)
 							Log.Error(err)
