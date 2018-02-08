@@ -133,8 +133,11 @@ Homepage: https://github.com/shenwei356/rush
 			KeepOrder:           config.KeepOrder,
 			Retries:             config.Retries,
 			RetryInterval:       time.Duration(config.RetryInterval) * time.Second,
+			PrintRetryOutput:    config.PrintRetryOutput,
 			Timeout:             time.Duration(config.Timeout) * time.Second,
 			StopOnErr:           config.StopOnErr,
+			PropExitStatus:      config.PropExitStatus,
+			KillOnCtrlC:         config.KillOnCtrlC,
 			Verbose:             config.Verbose,
 			RecordSuccessfulCmd: config.Continue,
 		}
@@ -166,6 +169,8 @@ Homepage: https://github.com/shenwei356/rush
 
 		// channel of command
 		chCmdStr := make(chan string, config.Jobs)
+
+		anyCommands := false
 
 		// read data and generate command
 		go func() {
@@ -227,9 +232,11 @@ Homepage: https://github.com/shenwei356/rush
 									bfhSuccCmds.Flush()
 								} else {
 									chCmdStr <- cmdStr
+									anyCommands = true
 								}
 							} else {
 								chCmdStr <- cmdStr
+								anyCommands = true
 							}
 
 							id++
@@ -254,9 +261,11 @@ Homepage: https://github.com/shenwei356/rush
 								bfhSuccCmds.Flush()
 							} else {
 								chCmdStr <- cmdStr
+								anyCommands = true
 							}
 						} else {
 							chCmdStr <- cmdStr
+							anyCommands = true
 						}
 					}
 				}
@@ -273,7 +282,7 @@ Homepage: https://github.com/shenwei356/rush
 		// ---------------------------------------------------------------
 
 		// run
-		chOutput, chSuccessfulCmd, doneSendOutput := process.Run4Output(opts, cancel, chCmdStr)
+		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4Output(opts, cancel, chCmdStr)
 
 		// read from chOutput and print
 		doneOutput := make(chan int)
@@ -299,6 +308,35 @@ Homepage: https://github.com/shenwei356/rush
 					bfhSuccCmds.Flush()
 				}
 				doneSaveSuccCmd <- 1
+			}()
+		}
+
+		var pToolExitStatus *int = nil
+		var doneExitStatus chan int
+		if config.PropExitStatus {
+			doneExitStatus = make(chan int)
+			toolExitStatus := 0
+			go func() {
+				for childCode := range chExitStatus {
+					setPointer := false
+					setCode := false
+					if pToolExitStatus == nil {
+						setPointer = true
+						setCode = true
+					} else {
+						// use the code from the first error we received
+						if *pToolExitStatus == 0 && childCode != 0 {
+							setCode = true
+						}
+					}
+					if setPointer {
+						pToolExitStatus = &toolExitStatus
+					}
+					if setCode {
+						*pToolExitStatus = childCode
+					}
+				}
+				doneExitStatus <- 1
 			}()
 		}
 
@@ -329,12 +367,25 @@ Homepage: https://github.com/shenwei356/rush
 		<-donePreprocessFiles // finish read data and send command
 		<-doneSendOutput      // finish send output
 		<-doneOutput          // finish print output
+		if config.PropExitStatus {
+			<-doneExitStatus
+		}
 		if config.Continue {
 			<-doneSaveSuccCmd
 		}
 
 		close(chExitSignalMonitor)
 		<-cleanupDone
+
+		if config.PropExitStatus {
+			if anyCommands {
+				if pToolExitStatus != nil {
+					os.Exit(*pToolExitStatus)
+				} else {
+					checkError(fmt.Errorf(`did not get an exit status int from any child process)`))
+				}
+			}
+		}
 	},
 }
 
@@ -369,10 +420,13 @@ func init() {
 
 	RootCmd.Flags().IntP("retries", "r", 0, "maximum retries (default 0)")
 	RootCmd.Flags().IntP("retry-interval", "", 0, "retry interval (unit: second) (default 0)")
+	RootCmd.Flags().BoolP("print-retry-output", "", true, "print output from retry commands")
 	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: second, 0 for no timeout) (default 0)")
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
 	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on first error(s)")
+	RootCmd.Flags().BoolP("propagate-exit-status", "", true, "propagate child exit status up to the exit status of rush")
+	RootCmd.Flags().BoolP("kill-on-ctrl-c", "", true, "kill child processes on ctrl-c")
 	RootCmd.Flags().BoolP("dry-run", "", false, "print command but not run")
 
 	RootCmd.Flags().BoolP("continue", "c", false, `continue jobs.`+
@@ -484,13 +538,16 @@ type Config struct {
 	FieldDelimiter       string
 	reFieldDelimiter     *regexp.Regexp
 
-	Retries       int
-	RetryInterval int
-	Timeout       int
+	Retries          int
+	RetryInterval    int
+	PrintRetryOutput bool
+	Timeout          int
 
-	KeepOrder bool
-	StopOnErr bool
-	DryRun    bool
+	KeepOrder      bool
+	StopOnErr      bool
+	PropExitStatus bool
+	KillOnCtrlC    bool
+	DryRun         bool
 
 	Continue    bool
 	SuccCmdFile string
@@ -549,13 +606,16 @@ func getConfigs(cmd *cobra.Command) Config {
 		NRecords:             getFlagPositiveInt(cmd, "nrecords"),
 		FieldDelimiter:       getFlagString(cmd, "field-delimiter"),
 
-		Retries:       getFlagNonNegativeInt(cmd, "retries"),
-		RetryInterval: getFlagNonNegativeInt(cmd, "retry-interval"),
-		Timeout:       getFlagNonNegativeInt(cmd, "timeout"),
+		Retries:          getFlagNonNegativeInt(cmd, "retries"),
+		RetryInterval:    getFlagNonNegativeInt(cmd, "retry-interval"),
+		PrintRetryOutput: getFlagBool(cmd, "print-retry-output"),
+		Timeout:          getFlagNonNegativeInt(cmd, "timeout"),
 
-		KeepOrder: getFlagBool(cmd, "keep-order"),
-		StopOnErr: getFlagBool(cmd, "stop-on-error"),
-		DryRun:    getFlagBool(cmd, "dry-run"),
+		KeepOrder:      getFlagBool(cmd, "keep-order"),
+		StopOnErr:      getFlagBool(cmd, "stop-on-error"),
+		PropExitStatus: getFlagBool(cmd, "propagate-exit-status"),
+		KillOnCtrlC:    getFlagBool(cmd, "kill-on-ctrl-c"),
+		DryRun:         getFlagBool(cmd, "dry-run"),
 
 		Continue:    getFlagBool(cmd, "continue"),
 		SuccCmdFile: getFlagString(cmd, "succ-cmd-file"),
