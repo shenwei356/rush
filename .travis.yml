@@ -13,4 +13,4 @@ before_install:
       fi
 
 script:
-    - ./tests/test.sh
+    - ./tests/test1.sh
