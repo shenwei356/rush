@@ -519,6 +519,9 @@ Specially thank [@brentp](https://github.com/brentp)
 and his [gargs](https://github.com/brentp/gargs), from which `rush` borrows
 some ideas.
 
+Thank [@bburgin](https://github.com/bburgin) for his contribution on improvement
+of child process management.
+
 ## Contact
 
 [Create an issue](https://github.com/shenwei356/rush/issues) to report bugs,
