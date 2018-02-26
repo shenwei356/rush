@@ -91,18 +91,19 @@ Homepage: https://github.com/shenwei356/rush
 		// -----------------------------------------------------------------
 
 		// out file handler
-		var outfh *bufio.Writer
+		var outfh *os.File = nil
+		var errfh *os.File = nil
 		if isStdin(config.OutFile) {
-			outfh = bufio.NewWriter(os.Stdout)
+			// use unbuffered file for writing, so we don't lose output on .Exit()
+			outfh = os.Stdout
+			errfh = os.Stderr
 		} else {
-			var fh *os.File
-			fh, err = os.Create(config.OutFile)
+			// use unbuffered file for writing, so we don't lose output on .Exit()
+			outfh, err = os.Create(config.OutFile)
 			checkError(err)
-			defer fh.Close()
-
-			outfh = bufio.NewWriter(fh)
+			defer outfh.Close()
+			errfh = outfh
 		}
-		defer outfh.Flush()
 
 		// TmpOutputDataBuffer = config.BufferSize
 		if config.DryRun {
@@ -133,6 +134,7 @@ Homepage: https://github.com/shenwei356/rush
 			KeepOrder:           config.KeepOrder,
 			Retries:             config.Retries,
 			RetryInterval:       time.Duration(config.RetryInterval) * time.Second,
+			ImmediateOutput:     config.ImmediateOutput,
 			PrintRetryOutput:    config.PrintRetryOutput,
 			Timeout:             time.Duration(config.Timeout) * time.Second,
 			StopOnErr:           config.StopOnErr,
@@ -282,7 +284,7 @@ Homepage: https://github.com/shenwei356/rush
 		// ---------------------------------------------------------------
 
 		// run
-		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4Output(opts, cancel, chCmdStr)
+		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4Output(opts, cancel, chCmdStr, outfh, errfh)
 
 		// read from chOutput and print
 		doneOutput := make(chan int)
@@ -291,12 +293,9 @@ Homepage: https://github.com/shenwei356/rush
 			for c := range chOutput {
 				outfh.WriteString(c)
 				if t := time.Now(); t.After(last) {
-					outfh.Flush()
 					last = t.Add(2 * time.Second)
 				}
 			}
-			outfh.Flush()
-
 			doneOutput <- 1
 		}()
 
@@ -420,6 +419,7 @@ func init() {
 
 	RootCmd.Flags().IntP("retries", "r", 0, "maximum retries (default 0)")
 	RootCmd.Flags().IntP("retry-interval", "", 0, "retry interval (unit: second) (default 0)")
+	RootCmd.Flags().BoolP("immediate-output", "", false, "print output immediately and interleaved, to aid debugging")
 	RootCmd.Flags().BoolP("print-retry-output", "", true, "print output from retry commands")
 	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: second, 0 for no timeout) (default 0)")
 
@@ -540,6 +540,7 @@ type Config struct {
 
 	Retries          int
 	RetryInterval    int
+	ImmediateOutput  bool
 	PrintRetryOutput bool
 	Timeout          int
 
@@ -608,6 +609,7 @@ func getConfigs(cmd *cobra.Command) Config {
 
 		Retries:          getFlagNonNegativeInt(cmd, "retries"),
 		RetryInterval:    getFlagNonNegativeInt(cmd, "retry-interval"),
+		ImmediateOutput:  getFlagBool(cmd, "immediate-output"),
 		PrintRetryOutput: getFlagBool(cmd, "print-retry-output"),
 		Timeout:          getFlagNonNegativeInt(cmd, "timeout"),
 
