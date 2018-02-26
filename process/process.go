@@ -66,11 +66,12 @@ type Command struct {
 	ctx       context.Context    // context.WithTimeout
 	ctxCancel context.CancelFunc // cancel func for timetout
 
-	Ch               chan string   // channel for stdout
-	reader           *bufio.Reader // reader for stdout
-	tmpfile          string        // tmpfile for stdout
-	tmpfh            *os.File      // file handler for tmpfile
-	finishSendOutput bool          // a flag of whether finished sending output to Ch
+	Ch                 chan string    // channel for stdout
+	reader             *bufio.Reader  // reader for stdout
+	tmpfile            string         // tmpfile for stdout
+	tmpfh              *os.File       // file handler for tmpfile
+	ImmediateDoneGroup sync.WaitGroup // wait for immediate output to be done
+	finishSendOutput   bool           // a flag of whether finished sending output to Ch
 
 	Err      error         // Error
 	Duration time.Duration // runtime
@@ -107,7 +108,7 @@ var TmpOutputDataBuffer = 1048576 // 1M
 var OutputChunkSize = 16384 // 16K
 
 // Run runs a command and send output to command.Ch in background.
-func (c *Command) Run(opts *Options) (chan string, error) {
+func (c *Command) Run(opts *Options, tryNumber int, outfh *os.File, errfh *os.File) (chan string, error) {
 	// create a return chan here; we will set the c.Ch in the parent
 	ch := make(chan string, 1)
 
@@ -118,7 +119,7 @@ func (c *Command) Run(opts *Options) (chan string, error) {
 		return ch, nil
 	}
 
-	c.Err = c.run(opts)
+	c.Err = c.run(opts, tryNumber, outfh, errfh)
 
 	// don't return here, keep going so we can display
 	// the output from commands that error
@@ -129,73 +130,79 @@ func (c *Command) Run(opts *Options) (chan string, error) {
 	}
 
 	go func() {
-		if c.tmpfile != "" { // data saved in tempfile
-			c.reader = bufio.NewReader(c.tmpfh)
-		}
-
-		buf := make([]byte, OutputChunkSize)
-		var n int
-		var i int
-		var b bytes.Buffer
-		var bb []byte
-		var existedN int
-		// var N uint64
-		for {
-			if c.reader != nil {
-				n, readErr = c.reader.Read(buf)
-			} else {
-				n = 0
-				readErr = io.EOF
+		if opts.ImmediateOutput {
+			c.ImmediateDoneGroup.Wait()
+			close(ch)
+			c.finishSendOutput = true
+		} else {
+			if c.tmpfile != "" { // data saved in tempfile
+				c.reader = bufio.NewReader(c.tmpfh)
 			}
 
-			existedN = b.Len()
-			b.Write(buf[0:n])
-
-			if readErr != nil {
-				if readErr == io.EOF {
-					if b.Len() > 0 {
-						// if Verbose {
-						// 	N += uint64(b.Len())
-						// }
-						ch <- b.String() // string(buf[0:n])
-					}
-					b.Reset()
-					readErr = nil
+			buf := make([]byte, OutputChunkSize)
+			var n int
+			var i int
+			var b bytes.Buffer
+			var bb []byte
+			var existedN int
+			// var N uint64
+			for {
+				if c.reader != nil {
+					n, readErr = c.reader.Read(buf)
+				} else {
+					n = 0
+					readErr = io.EOF
 				}
-				break
-			}
 
-			bb = b.Bytes()
-			i = bytes.LastIndexByte(bb, '\n')
-			if i < 0 {
-				continue
+				existedN = b.Len()
+				b.Write(buf[0:n])
+
+				if readErr != nil {
+					if readErr == io.EOF {
+						if b.Len() > 0 {
+							// if Verbose {
+							// 	N += uint64(b.Len())
+							// }
+							ch <- b.String() // string(buf[0:n])
+						}
+						b.Reset()
+						readErr = nil
+					}
+					break
+				}
+
+				bb = b.Bytes()
+				i = bytes.LastIndexByte(bb, '\n')
+				if i < 0 {
+					continue
+				}
+
+				// if Verbose {
+				// 	N += uint64(len(bb[0 : i+1]))
+				// }
+				ch <- string(bb[0 : i+1]) // string(buf[0:n])
+
+				b.Reset()
+				if i-existedN+1 < n {
+					// ------    ======i========n
+					// existed   buf
+					//   5          4      6
+					b.Write(buf[i-existedN+1 : n])
+				}
+				// N += n
 			}
 
 			// if Verbose {
-			// 	N += uint64(len(bb[0 : i+1]))
+			// 	Log.Debugf("cmd #%d sent %d bytes\n", c.ID, N)
 			// }
-			ch <- string(bb[0 : i+1]) // string(buf[0:n])
 
-			b.Reset()
-			if i-existedN+1 < n {
-				// ------    ======i========n
-				// existed   buf
-				//   5          4      6
-				b.Write(buf[i-existedN+1 : n])
-			}
-			// N += n
+			// if Verbose {
+			// 	Log.Infof("finish reading data from: %s", c.Cmd)
+			// }
+
+			close(ch)
+			c.finishSendOutput = true
 		}
-
-		// if Verbose {
-		// 	Log.Debugf("cmd #%d sent %d bytes\n", c.ID, N)
-		// }
-
-		// if Verbose {
-		// 	Log.Infof("finish reading data from: %s", c.Cmd)
-		// }
-
-		close(ch)
-		c.finishSendOutput = true
 	}()
 	if c.Err != nil {
 		return ch, c.Err
@@ -304,10 +311,96 @@ func killWindowsProcessTreeRecursive(childProcess *psutil.Process) {
 	}
 }
 
+// SafeCounter is safe to use concurrently.
+type SafeCounter struct {
+	v    uint64
+	lock sync.Mutex
+}
+
+func (c *SafeCounter) readThenInc() uint64 {
+	c.lock.Lock()
+	value := c.v
+	c.v++
+	c.lock.Unlock()
+	return value
+}
+
+type TopLevelEnum int
+
+const (
+	NotTopLevel TopLevelEnum = 0
+	TopLevel    TopLevelEnum = 1
+)
+
+// lexicographically encode integer
+// based on http://www.zanopha.com/docs/elen.pdf
+func lexEncode(n uint64, topLevel TopLevelEnum) string {
+	var encoded string
+	// recursively calculate lex prefix
+	// the lex prefix allows the user to lexicographically sort the output
+	// need lex prefix if n has more than one digit
+	nstr := fmt.Sprintf("%d", n)
+	nlen := uint64(len(nstr))
+	if nlen > 1 {
+		// include non-numeric part of lex prefix
+		// to allow proper sorting, this char must come after numerics in the ascii table
+		encoded = fmt.Sprintf("_")
+		// then include recursive part
+		encoded += lexEncode(nlen, NotTopLevel)
+		// conditionally include lex separator
+		if topLevel == TopLevel {
+			// the lex separator allows the user to differentiate a numeric part of the lex prefix from the original number
+			// to allow proper sorting, the lex separator must come before numerics in the ascii table
+			encoded += "."
+		}
+	}
+	// include numeric part of lex prefix, or
+	// original number (if topLevel==true)
+	encoded += nstr
+	return encoded
+}
+
+func getEntrySeparator() string {
+	// to allow proper sorting, the entry separator must come before numerics in the ascii table
+	return "/"
+}
+
+func writeImmediateLines(numJobs int, cmdId uint64, tryNumber int, lineNumber *SafeCounter, reader *bufio.Reader, fh *os.File) error {
+	var err error = nil
+	for {
+		// read line by line
+		var line string
+		if reader != nil {
+			line, err = reader.ReadString('\n')
+			// only write non-empty lines
+			if len(line) > 0 && line != "\n" && line != "\r\n" {
+				// we only need to prefix output if running in parallel
+				if numJobs > 1 {
+					// we prefix lines so that the user can differentiate the contents of the interleaved output
+					// use parentheses, encoded integers, and a colon, so that the user can afterward sort the output lines
+					// and get the output correctly grouped by command id, try number, and line
+					lineNumberValue := lineNumber.readThenInc()
+					prefix := fmt.Sprintf("(%s", lexEncode(cmdId, TopLevel))
+					prefix += fmt.Sprintf("%s%s", getEntrySeparator(), lexEncode(uint64(tryNumber), TopLevel))
+					prefix += fmt.Sprintf("%s%s): ", getEntrySeparator(), lexEncode(lineNumberValue, TopLevel))
+					line = prefix + line
+				}
+				fh.WriteString(line)
+			}
+		} else {
+			err = io.EOF
+		}
+		if err != nil {
+			break
+		}
+	}
+	return err
+}
+
 // run a command and pass output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
-func (c *Command) run(opts *Options) error {
+func (c *Command) run(opts *Options, tryNumber int, outfh *os.File, errfh *os.File) error {
 	t := time.Now()
 	chCancelMonitor := make(chan struct{})
 	defer func() {
@@ -344,14 +437,33 @@ func (c *Command) run(opts *Options) error {
 	}
 	defer pipeStdout.Close()
 
-	command.Stderr = os.Stderr
+	var pipeStderr io.ReadCloser = nil
+	if opts.ImmediateOutput {
+		pipeStderr, err = command.StderrPipe()
+		if err != nil {
+			return errors.Wrapf(err, "get stderr pipe of cmd #%d: %s", c.ID, c.Cmd)
+		}
+		defer pipeStderr.Close()
+	} else {
+		// no code yet for stderr handling, so just have it go to os.Stderr
+		command.Stderr = os.Stderr
+	}
 
 	err = command.Start()
 	if err != nil {
 		return errors.Wrapf(err, "start cmd #%d: %s", c.ID, c.Cmd)
 	}
 
-	bpipe := bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
+	var outPipe *bufio.Reader = nil
+	var errPipe *bufio.Reader = nil
+	if opts.ImmediateOutput {
+		// use default size reader here, since reading line by line
+		outPipe = bufio.NewReader(pipeStdout)
+		errPipe = bufio.NewReader(pipeStderr)
+	} else {
+		outPipe = bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
+		// no errPipe setting here, since having the command's stderr go to os.Stderr above
+	}
 
 	chErr := make(chan error, 2) // may come from three sources, must be buffered
 	chEndBeforeTimeout := make(chan struct{})
@@ -394,6 +506,21 @@ func (c *Command) run(opts *Options) error {
 		}()
 	}
 
+	lineNumber := SafeCounter{v: 1}
+	if opts.ImmediateOutput {
+		// handle stdout
+		c.ImmediateDoneGroup.Add(2) // 2 since 1 for stdout and 1 for stderr
+		go func() {
+			defer c.ImmediateDoneGroup.Done()
+			writeImmediateLines(opts.Jobs, c.ID, tryNumber, &lineNumber, outPipe, outfh)
+		}()
+		// handle stderr
+		go func() {
+			defer c.ImmediateDoneGroup.Done()
+			writeImmediateLines(opts.Jobs, c.ID, tryNumber, &lineNumber, errPipe, errfh)
+		}()
+	}
+
 	// --------------------------------
 
 	// handle output
@@ -404,12 +531,22 @@ func (c *Command) run(opts *Options) error {
 		// this will cause data race.
 		go func() { // goroutine #P
 			// Peek is blocked method, it waits command even after timeout!!
-			readed, err = bpipe.Peek(TmpOutputDataBuffer)
+			if opts.ImmediateOutput {
+				// set EOF here, since handling output in readLine() above
+				err = io.EOF
+			} else {
+				readed, err = outPipe.Peek(TmpOutputDataBuffer)
+			}
 			chErr <- err
 		}()
 		err = <-chErr // from timeout #T or peek #P
 	} else {
-		readed, err = bpipe.Peek(TmpOutputDataBuffer)
+		if opts.ImmediateOutput {
+			// set EOF here, since handling output in readLine() above
+			err = io.EOF
+		} else {
+			readed, err = outPipe.Peek(TmpOutputDataBuffer)
+		}
 	}
 
 	// less than TmpOutputDataBuffer bytes in output...
@@ -429,8 +566,10 @@ func (c *Command) run(opts *Options) error {
 		if opts.PropExitStatus {
 			c.exitStatus = c.getExitStatus(err)
 		}
-		// get reader even on error, so we can still print the stdout and stderr of the failed child process
-		c.reader = bufio.NewReader(bytes.NewReader(readed))
+		if !opts.ImmediateOutput {
+			// get reader even on error, so we can still print the stdout and stderr of the failed child process
+			c.reader = bufio.NewReader(bytes.NewReader(readed))
+		}
 		if err != nil {
 			return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 		}
@@ -438,6 +577,9 @@ func (c *Command) run(opts *Options) error {
 	}
 
 	// more than TmpOutputDataBuffer bytes in output. must use tmpfile
+	if opts.ImmediateOutput {
+		panic("code assumes immediate output case does not use tmpfile")
+	}
 	if err != nil {
 		return errors.Wrapf(err, "run cmd #%d: %s", c.ID, c.Cmd)
 	}
@@ -454,7 +596,7 @@ func (c *Command) run(opts *Options) error {
 	}
 
 	btmp := bufio.NewWriter(c.tmpfh)
-	_, err = io.CopyBuffer(btmp, bpipe, readed)
+	_, err = io.CopyBuffer(btmp, outPipe, readed)
 	if err != nil {
 		return errors.Wrapf(err, "save buffered data to tmpfile: %s", c.tmpfile)
 	}
@@ -494,6 +636,7 @@ type Options struct {
 	KeepOrder           bool          // keep output order
 	Retries             int           // max retry chances
 	RetryInterval       time.Duration // retry interval
+	ImmediateOutput     bool          // print output immediately and interleaved
 	PrintRetryOutput    bool          // print output from retries
 	Timeout             time.Duration // timeout
 	StopOnErr           bool          // stop on any error
@@ -506,11 +649,11 @@ type Options struct {
 // Run4Output runs commands in parallel from channel chCmdStr,
 // and returns an output text channel,
 // and a done channel to ensure safe exit.
-func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan string, chan string, chan int, chan int) {
+func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string, outfh *os.File, errfh *os.File) (chan string, chan string, chan int, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
-	chCmd, chSuccessfulCmd, doneChCmd, chExitStatus := Run(opts, cancel, chCmdStr)
+	chCmd, chSuccessfulCmd, doneChCmd, chExitStatus := Run(opts, cancel, chCmdStr, outfh, errfh)
 	chOut := make(chan string, opts.Jobs)
 	done := make(chan int)
 
@@ -657,7 +800,7 @@ func combine(inputs []<-chan string, output chan<- string) {
 // Run runs commands in parallel from channel chCmdStr，
 // and returns a Command channel,
 // and a done channel to ensure safe exit.
-func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Command, chan string, chan int, chan int) {
+func Run(opts *Options, cancel chan struct{}, chCmdStr chan string, outfh *os.File, errfh *os.File) (chan *Command, chan string, chan int, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
@@ -711,7 +854,8 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 				chances := opts.Retries
 				var outputsToPrint []<-chan string
 				for {
-					ch, err := command.Run(opts)
+					tryNumber := opts.Retries - chances + 1
+					ch, err := command.Run(opts, tryNumber, outfh, errfh)
 					if err != nil { // fail to run
 						if chances == 0 || opts.StopOnErr {
 							// print final output
@@ -752,8 +896,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 							}
 							if Verbose && opts.Retries > 0 {
 								Log.Warningf("retry %d/%d times: %s",
-									opts.Retries-chances+1,
-									opts.Retries, command.Cmd)
+									tryNumber,
+									opts.Retries,
+									command.Cmd)
 							}
 							chances--
 							<-time.After(opts.RetryInterval)
