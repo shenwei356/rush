@@ -108,7 +108,7 @@ var TmpOutputDataBuffer = 1048576 // 1M
 var OutputChunkSize = 16384 // 16K
 
 // Run runs a command and send output to command.Ch in background.
-func (c *Command) Run(opts *Options, tryNumber int, outfh *os.File, errfh *os.File) (chan string, error) {
+func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	// create a return chan here; we will set the c.Ch in the parent
 	ch := make(chan string, 1)
 
@@ -119,7 +119,7 @@ func (c *Command) Run(opts *Options, tryNumber int, outfh *os.File, errfh *os.Fi
 		return ch, nil
 	}
 
-	c.Err = c.run(opts, tryNumber, outfh, errfh)
+	c.Err = c.run(opts, tryNumber)
 
 	// don't return here, keep going so we can display
 	// the output from commands that error
@@ -385,7 +385,9 @@ func writeImmediateLines(numJobs int, cmdId uint64, tryNumber int, lineNumber *S
 					prefix += fmt.Sprintf("%s%s): ", getEntrySeparator(), lexEncode(lineNumberValue, TopLevel))
 					line = prefix + line
 				}
-				fh.WriteString(line)
+				if fh != nil {
+					fh.WriteString(line)
+				}
 			}
 		} else {
 			err = io.EOF
@@ -400,7 +402,7 @@ func writeImmediateLines(numJobs int, cmdId uint64, tryNumber int, lineNumber *S
 // run a command and pass output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
-func (c *Command) run(opts *Options, tryNumber int, outfh *os.File, errfh *os.File) error {
+func (c *Command) run(opts *Options, tryNumber int) error {
 	t := time.Now()
 	chCancelMonitor := make(chan struct{})
 	defer func() {
@@ -512,12 +514,12 @@ func (c *Command) run(opts *Options, tryNumber int, outfh *os.File, errfh *os.Fi
 		c.ImmediateDoneGroup.Add(2) // 2 since 1 for stdout and 1 for stderr
 		go func() {
 			defer c.ImmediateDoneGroup.Done()
-			writeImmediateLines(opts.Jobs, c.ID, tryNumber, &lineNumber, outPipe, outfh)
+			writeImmediateLines(opts.Jobs, c.ID, tryNumber, &lineNumber, outPipe, opts.OutFileHandle)
 		}()
 		// handle stderr
 		go func() {
 			defer c.ImmediateDoneGroup.Done()
-			writeImmediateLines(opts.Jobs, c.ID, tryNumber, &lineNumber, errPipe, errfh)
+			writeImmediateLines(opts.Jobs, c.ID, tryNumber, &lineNumber, errPipe, opts.ErrFileHandle)
 		}()
 	}
 
@@ -636,6 +638,8 @@ type Options struct {
 	KeepOrder           bool          // keep output order
 	Retries             int           // max retry chances
 	RetryInterval       time.Duration // retry interval
+	OutFileHandle       *os.File      // where to send stdout
+	ErrFileHandle       *os.File      // where to send stderr
 	ImmediateOutput     bool          // print output immediately and interleaved
 	PrintRetryOutput    bool          // print output from retries
 	Timeout             time.Duration // timeout
@@ -649,11 +653,11 @@ type Options struct {
 // Run4Output runs commands in parallel from channel chCmdStr,
 // and returns an output text channel,
 // and a done channel to ensure safe exit.
-func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string, outfh *os.File, errfh *os.File) (chan string, chan string, chan int, chan int) {
+func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan string, chan string, chan int, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
-	chCmd, chSuccessfulCmd, doneChCmd, chExitStatus := Run(opts, cancel, chCmdStr, outfh, errfh)
+	chCmd, chSuccessfulCmd, doneChCmd, chExitStatus := Run(opts, cancel, chCmdStr)
 	chOut := make(chan string, opts.Jobs)
 	done := make(chan int)
 
@@ -800,7 +804,7 @@ func combine(inputs []<-chan string, output chan<- string) {
 // Run runs commands in parallel from channel chCmdStr，
 // and returns a Command channel,
 // and a done channel to ensure safe exit.
-func Run(opts *Options, cancel chan struct{}, chCmdStr chan string, outfh *os.File, errfh *os.File) (chan *Command, chan string, chan int, chan int) {
+func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Command, chan string, chan int, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
@@ -855,7 +859,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string, outfh *os.Fi
 				var outputsToPrint []<-chan string
 				for {
 					tryNumber := opts.Retries - chances + 1
-					ch, err := command.Run(opts, tryNumber, outfh, errfh)
+					ch, err := command.Run(opts, tryNumber)
 					if err != nil { // fail to run
 						if chances == 0 || opts.StopOnErr {
 							// print final output

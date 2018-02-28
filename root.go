@@ -134,6 +134,8 @@ Homepage: https://github.com/shenwei356/rush
 			KeepOrder:           config.KeepOrder,
 			Retries:             config.Retries,
 			RetryInterval:       time.Duration(config.RetryInterval) * time.Second,
+			OutFileHandle:       outfh,
+			ErrFileHandle:       errfh,
 			ImmediateOutput:     config.ImmediateOutput,
 			PrintRetryOutput:    config.PrintRetryOutput,
 			Timeout:             time.Duration(config.Timeout) * time.Second,
@@ -284,7 +286,7 @@ Homepage: https://github.com/shenwei356/rush
 		// ---------------------------------------------------------------
 
 		// run
-		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4Output(opts, cancel, chCmdStr, outfh, errfh)
+		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4Output(opts, cancel, chCmdStr)
 
 		// read from chOutput and print
 		doneOutput := make(chan int)
