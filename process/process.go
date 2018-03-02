@@ -29,6 +29,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -66,12 +67,11 @@ type Command struct {
 	ctx       context.Context    // context.WithTimeout
 	ctxCancel context.CancelFunc // cancel func for timetout
 
-	Ch                 chan string    // channel for stdout
-	reader             *bufio.Reader  // reader for stdout
-	tmpfile            string         // tmpfile for stdout
-	tmpfh              *os.File       // file handler for tmpfile
-	ImmediateDoneGroup sync.WaitGroup // wait for immediate output to be done
-	finishSendOutput   bool           // a flag of whether finished sending output to Ch
+	Ch               chan string   // channel for stdout
+	reader           *bufio.Reader // reader for stdout
+	tmpfile          string        // tmpfile for stdout
+	tmpfh            *os.File      // file handler for tmpfile
+	finishSendOutput bool          // a flag of whether finished sending output to Ch
 
 	Err      error         // Error
 	Duration time.Duration // runtime
@@ -131,7 +131,6 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 
 	go func() {
 		if opts.ImmediateOutput {
-			c.ImmediateDoneGroup.Wait()
 			close(ch)
 			c.finishSendOutput = true
 		} else {
@@ -311,20 +310,6 @@ func killWindowsProcessTreeRecursive(childProcess *psutil.Process) {
 	}
 }
 
-// SafeCounter is safe to use concurrently.
-type SafeCounter struct {
-	v    uint64
-	lock sync.Mutex
-}
-
-func (c *SafeCounter) readThenInc() uint64 {
-	c.lock.Lock()
-	value := c.v
-	c.v++
-	c.lock.Unlock()
-	return value
-}
-
 type TopLevelEnum int
 
 const (
@@ -365,38 +350,123 @@ func getEntrySeparator() string {
 	return "/"
 }
 
-func writeImmediateLines(numJobs int, cmdId uint64, tryNumber int, lineNumber *SafeCounter, reader *bufio.Reader, fh *os.File) error {
-	var err error = nil
-	for {
-		// read line by line
-		var line string
-		if reader != nil {
-			line, err = reader.ReadString('\n')
-			// only write non-empty lines
-			if len(line) > 0 && line != "\n" && line != "\r\n" {
-				// we only need to prefix output if running in parallel
-				if numJobs > 1 {
-					// we prefix lines so that the user can differentiate the contents of the interleaved output
-					// use parentheses, encoded integers, and a colon, so that the user can afterward sort the output lines
-					// and get the output correctly grouped by command id, try number, and line
-					lineNumberValue := lineNumber.readThenInc()
-					prefix := fmt.Sprintf("(%s", lexEncode(cmdId, TopLevel))
-					prefix += fmt.Sprintf("%s%s", getEntrySeparator(), lexEncode(uint64(tryNumber), TopLevel))
-					prefix += fmt.Sprintf("%s%s): ", getEntrySeparator(), lexEncode(lineNumberValue, TopLevel))
-					line = prefix + line
+// ImmediateLineWriter is safe to use concurrently
+type ImmediateLineWriter struct {
+	lock          *sync.Mutex
+	numJobs       int
+	cmdId         uint64
+	tryNumber     int
+	line          string
+	lineNumber    uint64
+	includePrefix bool
+}
+
+func includeImmediatePrefix(cmdId uint64, tryNumber int, lineNumber uint64, data *string) {
+	prefix := fmt.Sprintf("(%s", lexEncode(cmdId, TopLevel))
+	prefix += fmt.Sprintf("%s%s", getEntrySeparator(), lexEncode(uint64(tryNumber), TopLevel))
+	prefix += fmt.Sprintf("%s%s): ", getEntrySeparator(), lexEncode(lineNumber, TopLevel))
+	if data != nil {
+		*data = *data + prefix
+	}
+}
+
+func NewImmediateLineWriter(lock *sync.Mutex, numJobs int, cmdId uint64, tryNumber int) *ImmediateLineWriter {
+	lw := &ImmediateLineWriter{}
+	lw.lock = lock
+	lw.numJobs = numJobs
+	lw.cmdId = cmdId
+	lw.tryNumber = tryNumber
+	lw.lineNumber = 1       // start with 1
+	lw.includePrefix = true // start line 1 with a prefix
+	return lw
+}
+
+func (lw *ImmediateLineWriter) addPrefixIfNeeded(output *string) {
+	if lw.includePrefix {
+		includeImmediatePrefix(lw.cmdId, lw.tryNumber, lw.lineNumber, output)
+		lw.includePrefix = false
+	}
+}
+
+func (lw *ImmediateLineWriter) WritePrefixedLines(input string, outfh *os.File) {
+	if lw.lock != nil {
+		// make immediate output thread-safe and do one write at a time
+		lw.lock.Lock()
+		// only include prefixes if jobs are running in parallel
+		if lw.numJobs > 1 {
+			var output string
+			reg := regexp.MustCompile("[\r\n]")
+			matchExtents := reg.FindAllStringIndex(input, -1)
+			if len(matchExtents) > 0 {
+				// use runes below, so we work correctly with unicode strings
+				rs := []rune(input)
+				lastStart := 0
+				for _, matchExtent := range matchExtents {
+					beforePart := string(rs[lastStart:matchExtent[0]])
+					lw.line = lw.line + beforePart
+					// skip empty lines
+					if len(lw.line) > 0 {
+						// there is some data in this part, so add prefix if needed
+						lw.addPrefixIfNeeded(&output)
+						// append the chars up to and including the delimiter
+						delimiterPart := string(rs[matchExtent[0]:matchExtent[1]])
+						output = output + beforePart + delimiterPart
+						// defer including prefix, so only add it on next non-empty data
+						lw.includePrefix = true
+						// clear line, since saw delimiter
+						lw.line = ""
+						lw.lineNumber++
+					}
+					lastStart = matchExtent[1]
 				}
-				if fh != nil {
-					fh.WriteString(line)
+				// append any remaining chars after the last delimiter
+				lastPart := string(rs[lastStart:len(rs)])
+				if len(lastPart) > 0 {
+					// there is some data in this part, so add prefix if needed
+					lw.addPrefixIfNeeded(&output)
+					lw.line = lw.line + lastPart
+					output = output + lastPart
 				}
+			} else {
+				// no delimiters in this section
+				// there is some input, so add prefix if needed
+				lw.addPrefixIfNeeded(&output)
+				lw.line = lw.line + input
+				output = output + input
+			}
+			if outfh != nil {
+				outfh.WriteString(output)
 			}
 		} else {
-			err = io.EOF
+			// no prefixes needed, since jobs are running serially
+			// just use the input string
+			if outfh != nil {
+				outfh.WriteString(input)
+			}
 		}
-		if err != nil {
-			break
-		}
+		lw.lock.Unlock()
 	}
-	return err
+}
+
+type ImmediateWriter struct {
+	lineWriter *ImmediateLineWriter
+	fh         *os.File
+}
+
+func NewImmediateWriter(lineWriter *ImmediateLineWriter, fh *os.File) *ImmediateWriter {
+	iw := &ImmediateWriter{}
+	iw.lineWriter = lineWriter
+	iw.fh = fh
+	return iw
+}
+
+func (iw ImmediateWriter) Write(p []byte) (n int, err error) {
+	dataLen := len(p)
+	// only write non-empty data
+	if dataLen > 0 {
+		iw.lineWriter.WritePrefixedLines(string(p), iw.fh)
+	}
+	return dataLen, nil
 }
 
 // run a command and pass output to c.reader.
@@ -433,20 +503,17 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 		}
 	}
 
-	pipeStdout, err := command.StdoutPipe()
-	if err != nil {
-		return errors.Wrapf(err, "get stdout pipe of cmd #%d: %s", c.ID, c.Cmd)
-	}
-	defer pipeStdout.Close()
-
-	var pipeStderr io.ReadCloser = nil
+	var pipeStdout io.ReadCloser = nil
+	var err error = nil
 	if opts.ImmediateOutput {
-		pipeStderr, err = command.StderrPipe()
-		if err != nil {
-			return errors.Wrapf(err, "get stderr pipe of cmd #%d: %s", c.ID, c.Cmd)
-		}
-		defer pipeStderr.Close()
+		lineWriter := NewImmediateLineWriter(&opts.ImmediateLock, opts.Jobs, c.ID, tryNumber)
+		command.Stdout = NewImmediateWriter(lineWriter, opts.OutFileHandle)
+		command.Stderr = NewImmediateWriter(lineWriter, opts.ErrFileHandle)
 	} else {
+		pipeStdout, err = command.StdoutPipe()
+		if err != nil {
+			return errors.Wrapf(err, "get stdout pipe of cmd #%d: %s", c.ID, c.Cmd)
+		}
 		// no code yet for stderr handling, so just have it go to os.Stderr
 		command.Stderr = os.Stderr
 	}
@@ -457,12 +524,7 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 	}
 
 	var outPipe *bufio.Reader = nil
-	var errPipe *bufio.Reader = nil
-	if opts.ImmediateOutput {
-		// use default size reader here, since reading line by line
-		outPipe = bufio.NewReader(pipeStdout)
-		errPipe = bufio.NewReader(pipeStderr)
-	} else {
+	if !opts.ImmediateOutput {
 		outPipe = bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
 		// no errPipe setting here, since having the command's stderr go to os.Stderr above
 	}
@@ -505,21 +567,6 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 				chErr <- nil
 				return
 			}
-		}()
-	}
-
-	lineNumber := SafeCounter{v: 1}
-	if opts.ImmediateOutput {
-		// handle stdout
-		c.ImmediateDoneGroup.Add(2) // 2 since 1 for stdout and 1 for stderr
-		go func() {
-			defer c.ImmediateDoneGroup.Done()
-			writeImmediateLines(opts.Jobs, c.ID, tryNumber, &lineNumber, outPipe, opts.OutFileHandle)
-		}()
-		// handle stderr
-		go func() {
-			defer c.ImmediateDoneGroup.Done()
-			writeImmediateLines(opts.Jobs, c.ID, tryNumber, &lineNumber, errPipe, opts.ErrFileHandle)
 		}()
 	}
 
@@ -641,6 +688,7 @@ type Options struct {
 	OutFileHandle       *os.File      // where to send stdout
 	ErrFileHandle       *os.File      // where to send stderr
 	ImmediateOutput     bool          // print output immediately and interleaved
+	ImmediateLock       sync.Mutex    // make immediate output thread-safe and do one write at a time
 	PrintRetryOutput    bool          // print output from retries
 	Timeout             time.Duration // timeout
 	StopOnErr           bool          // stop on any error
