@@ -29,6 +29,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -107,7 +108,7 @@ var TmpOutputDataBuffer = 1048576 // 1M
 var OutputChunkSize = 16384 // 16K
 
 // Run runs a command and send output to command.Ch in background.
-func (c *Command) Run(opts *Options) (chan string, error) {
+func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	// create a return chan here; we will set the c.Ch in the parent
 	ch := make(chan string, 1)
 
@@ -118,7 +119,7 @@ func (c *Command) Run(opts *Options) (chan string, error) {
 		return ch, nil
 	}
 
-	c.Err = c.run(opts)
+	c.Err = c.run(opts, tryNumber)
 
 	// don't return here, keep going so we can display
 	// the output from commands that error
@@ -129,73 +130,78 @@ func (c *Command) Run(opts *Options) (chan string, error) {
 	}
 
 	go func() {
-		if c.tmpfile != "" { // data saved in tempfile
-			c.reader = bufio.NewReader(c.tmpfh)
-		}
-
-		buf := make([]byte, OutputChunkSize)
-		var n int
-		var i int
-		var b bytes.Buffer
-		var bb []byte
-		var existedN int
-		// var N uint64
-		for {
-			if c.reader != nil {
-				n, readErr = c.reader.Read(buf)
-			} else {
-				n = 0
-				readErr = io.EOF
+		if opts.ImmediateOutput {
+			close(ch)
+			c.finishSendOutput = true
+		} else {
+			if c.tmpfile != "" { // data saved in tempfile
+				c.reader = bufio.NewReader(c.tmpfh)
 			}
 
-			existedN = b.Len()
-			b.Write(buf[0:n])
-
-			if readErr != nil {
-				if readErr == io.EOF {
-					if b.Len() > 0 {
-						// if Verbose {
-						// 	N += uint64(b.Len())
-						// }
-						ch <- b.String() // string(buf[0:n])
-					}
-					b.Reset()
-					readErr = nil
+			buf := make([]byte, OutputChunkSize)
+			var n int
+			var i int
+			var b bytes.Buffer
+			var bb []byte
+			var existedN int
+			// var N uint64
+			for {
+				if c.reader != nil {
+					n, readErr = c.reader.Read(buf)
+				} else {
+					n = 0
+					readErr = io.EOF
 				}
-				break
-			}
 
-			bb = b.Bytes()
-			i = bytes.LastIndexByte(bb, '\n')
-			if i < 0 {
-				continue
+				existedN = b.Len()
+				b.Write(buf[0:n])
+
+				if readErr != nil {
+					if readErr == io.EOF {
+						if b.Len() > 0 {
+							// if Verbose {
+							// 	N += uint64(b.Len())
+							// }
+							ch <- b.String() // string(buf[0:n])
+						}
+						b.Reset()
+						readErr = nil
+					}
+					break
+				}
+
+				bb = b.Bytes()
+				i = bytes.LastIndexByte(bb, '\n')
+				if i < 0 {
+					continue
+				}
+
+				// if Verbose {
+				// 	N += uint64(len(bb[0 : i+1]))
+				// }
+				ch <- string(bb[0 : i+1]) // string(buf[0:n])
+
+				b.Reset()
+				if i-existedN+1 < n {
+					// ------    ======i========n
+					// existed   buf
+					//   5          4      6
+					b.Write(buf[i-existedN+1 : n])
+				}
+				// N += n
 			}
 
 			// if Verbose {
-			// 	N += uint64(len(bb[0 : i+1]))
+			// 	Log.Debugf("cmd #%d sent %d bytes\n", c.ID, N)
 			// }
-			ch <- string(bb[0 : i+1]) // string(buf[0:n])
 
-			b.Reset()
-			if i-existedN+1 < n {
-				// ------    ======i========n
-				// existed   buf
-				//   5          4      6
-				b.Write(buf[i-existedN+1 : n])
-			}
-			// N += n
+			// if Verbose {
+			// 	Log.Infof("finish reading data from: %s", c.Cmd)
+			// }
+
+			close(ch)
+			c.finishSendOutput = true
 		}
-
-		// if Verbose {
-		// 	Log.Debugf("cmd #%d sent %d bytes\n", c.ID, N)
-		// }
-
-		// if Verbose {
-		// 	Log.Infof("finish reading data from: %s", c.Cmd)
-		// }
-
-		close(ch)
-		c.finishSendOutput = true
 	}()
 	if c.Err != nil {
 		return ch, c.Err
@@ -304,10 +310,169 @@ func killWindowsProcessTreeRecursive(childProcess *psutil.Process) {
 	}
 }
 
+type TopLevelEnum int
+
+const (
+	NotTopLevel TopLevelEnum = 0
+	TopLevel    TopLevelEnum = 1
+)
+
+// lexicographically encode integer
+// based on http://www.zanopha.com/docs/elen.pdf
+func lexEncode(n uint64, topLevel TopLevelEnum) string {
+	var encoded string
+	// recursively calculate lex prefix
+	// the lex prefix allows the user to lexicographically sort the output
+	// need lex prefix if n has more than one digit
+	nstr := fmt.Sprintf("%d", n)
+	nlen := uint64(len(nstr))
+	if nlen > 1 {
+		// include non-numeric part of lex prefix
+		// to allow proper sorting, this char must come after numerics in the ascii table
+		encoded = fmt.Sprintf("_")
+		// then include recursive part
+		encoded += lexEncode(nlen, NotTopLevel)
+		// conditionally include lex separator
+		if topLevel == TopLevel {
+			// the lex separator allows the user to differentiate a numeric part of the lex prefix from the original number
+			// to allow proper sorting, the lex separator must come before numerics in the ascii table
+			encoded += "."
+		}
+	}
+	// include numeric part of lex prefix, or
+	// original number (if topLevel==true)
+	encoded += nstr
+	return encoded
+}
+
+func getEntrySeparator() string {
+	// to allow proper sorting, the entry separator must come before numerics in the ascii table
+	return "/"
+}
+
+// ImmediateLineWriter is safe to use concurrently
+type ImmediateLineWriter struct {
+	lock          *sync.Mutex
+	numJobs       int
+	cmdId         uint64
+	tryNumber     int
+	line          string
+	lineNumber    uint64
+	includePrefix bool
+}
+
+func includeImmediatePrefix(cmdId uint64, tryNumber int, lineNumber uint64, data *string) {
+	prefix := fmt.Sprintf("(%s", lexEncode(cmdId, TopLevel))
+	prefix += fmt.Sprintf("%s%s", getEntrySeparator(), lexEncode(uint64(tryNumber), TopLevel))
+	prefix += fmt.Sprintf("%s%s): ", getEntrySeparator(), lexEncode(lineNumber, TopLevel))
+	if data != nil {
+		*data = *data + prefix
+	}
+}
+
+func NewImmediateLineWriter(lock *sync.Mutex, numJobs int, cmdId uint64, tryNumber int) *ImmediateLineWriter {
+	lw := &ImmediateLineWriter{}
+	lw.lock = lock
+	lw.numJobs = numJobs
+	lw.cmdId = cmdId
+	lw.tryNumber = tryNumber
+	lw.lineNumber = 1       // start with 1
+	lw.includePrefix = true // start line 1 with a prefix
+	return lw
+}
+
+func (lw *ImmediateLineWriter) addPrefixIfNeeded(output *string) {
+	if lw.includePrefix {
+		includeImmediatePrefix(lw.cmdId, lw.tryNumber, lw.lineNumber, output)
+		lw.includePrefix = false
+	}
+}
+
+func (lw *ImmediateLineWriter) WritePrefixedLines(input string, outfh *os.File) {
+	if lw.lock != nil {
+		// make immediate output thread-safe and do one write at a time
+		lw.lock.Lock()
+		// only include prefixes if jobs are running in parallel
+		if lw.numJobs > 1 {
+			var output string
+			reg := regexp.MustCompile("[\r\n]")
+			matchExtents := reg.FindAllStringIndex(input, -1)
+			if len(matchExtents) > 0 {
+				// use runes below, so we work correctly with unicode strings
+				rs := []rune(input)
+				lastStart := 0
+				for _, matchExtent := range matchExtents {
+					beforePart := string(rs[lastStart:matchExtent[0]])
+					lw.line = lw.line + beforePart
+					// skip empty lines
+					if len(lw.line) > 0 {
+						// there is some data in this part, so add prefix if needed
+						lw.addPrefixIfNeeded(&output)
+						// append the chars up to and including the delimiter
+						delimiterPart := string(rs[matchExtent[0]:matchExtent[1]])
+						output = output + beforePart + delimiterPart
+						// defer including prefix, so only add it on next non-empty data
+						lw.includePrefix = true
+						// clear line, since saw delimiter
+						lw.line = ""
+						lw.lineNumber++
+					}
+					lastStart = matchExtent[1]
+				}
+				// append any remaining chars after the last delimiter
+				lastPart := string(rs[lastStart:len(rs)])
+				if len(lastPart) > 0 {
+					// there is some data in this part, so add prefix if needed
+					lw.addPrefixIfNeeded(&output)
+					lw.line = lw.line + lastPart
+					output = output + lastPart
+				}
+			} else {
+				// no delimiters in this section
+				// there is some input, so add prefix if needed
+				lw.addPrefixIfNeeded(&output)
+				lw.line = lw.line + input
+				output = output + input
+			}
+			if outfh != nil {
+				outfh.WriteString(output)
+			}
+		} else {
+			// no prefixes needed, since jobs are running serially
+			// just use the input string
+			if outfh != nil {
+				outfh.WriteString(input)
+			}
+		}
+		lw.lock.Unlock()
+	}
+}
+
+type ImmediateWriter struct {
+	lineWriter *ImmediateLineWriter
+	fh         *os.File
+}
+
+func NewImmediateWriter(lineWriter *ImmediateLineWriter, fh *os.File) *ImmediateWriter {
+	iw := &ImmediateWriter{}
+	iw.lineWriter = lineWriter
+	iw.fh = fh
+	return iw
+}
+
+func (iw ImmediateWriter) Write(p []byte) (n int, err error) {
+	dataLen := len(p)
+	// only write non-empty data
+	if dataLen > 0 {
+		iw.lineWriter.WritePrefixedLines(string(p), iw.fh)
+	}
+	return dataLen, nil
+}
+
 // run a command and pass output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
-func (c *Command) run(opts *Options) error {
+func (c *Command) run(opts *Options, tryNumber int) error {
 	t := time.Now()
 	chCancelMonitor := make(chan struct{})
 	defer func() {
@@ -338,20 +503,31 @@ func (c *Command) run(opts *Options) error {
 		}
 	}
 
-	pipeStdout, err := command.StdoutPipe()
-	if err != nil {
-		return errors.Wrapf(err, "get stdout pipe of cmd #%d: %s", c.ID, c.Cmd)
+	var pipeStdout io.ReadCloser = nil
+	var err error = nil
+	if opts.ImmediateOutput {
+		lineWriter := NewImmediateLineWriter(&opts.ImmediateLock, opts.Jobs, c.ID, tryNumber)
+		command.Stdout = NewImmediateWriter(lineWriter, opts.OutFileHandle)
+		command.Stderr = NewImmediateWriter(lineWriter, opts.ErrFileHandle)
+	} else {
+		pipeStdout, err = command.StdoutPipe()
+		if err != nil {
+			return errors.Wrapf(err, "get stdout pipe of cmd #%d: %s", c.ID, c.Cmd)
+		}
+		// no code yet for stderr handling, so just have it go to os.Stderr
+		command.Stderr = os.Stderr
 	}
-	defer pipeStdout.Close()
-
-	command.Stderr = os.Stderr
 
 	err = command.Start()
 	if err != nil {
 		return errors.Wrapf(err, "start cmd #%d: %s", c.ID, c.Cmd)
 	}
 
-	bpipe := bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
+	var outPipe *bufio.Reader = nil
+	if !opts.ImmediateOutput {
+		outPipe = bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
+		// no errPipe setting here, since having the command's stderr go to os.Stderr above
+	}
 
 	chErr := make(chan error, 2) // may come from three sources, must be buffered
 	chEndBeforeTimeout := make(chan struct{})
@@ -404,12 +580,22 @@ func (c *Command) run(opts *Options) error {
 		// this will cause data race.
 		go func() { // goroutine #P
 			// Peek is blocked method, it waits command even after timeout!!
-			readed, err = bpipe.Peek(TmpOutputDataBuffer)
+			if opts.ImmediateOutput {
+				// set EOF here, since handling output in readLine() above
+				err = io.EOF
+			} else {
+				readed, err = outPipe.Peek(TmpOutputDataBuffer)
+			}
 			chErr <- err
 		}()
 		err = <-chErr // from timeout #T or peek #P
 	} else {
-		readed, err = bpipe.Peek(TmpOutputDataBuffer)
+		if opts.ImmediateOutput {
+			// set EOF here, since handling output in readLine() above
+			err = io.EOF
+		} else {
+			readed, err = outPipe.Peek(TmpOutputDataBuffer)
+		}
 	}
 
 	// less than TmpOutputDataBuffer bytes in output...
@@ -429,8 +615,10 @@ func (c *Command) run(opts *Options) error {
 		if opts.PropExitStatus {
 			c.exitStatus = c.getExitStatus(err)
 		}
-		// get reader even on error, so we can still print the stdout and stderr of the failed child process
-		c.reader = bufio.NewReader(bytes.NewReader(readed))
+		if !opts.ImmediateOutput {
+			// get reader even on error, so we can still print the stdout and stderr of the failed child process
+			c.reader = bufio.NewReader(bytes.NewReader(readed))
+		}
 		if err != nil {
 			return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 		}
@@ -438,6 +626,9 @@ func (c *Command) run(opts *Options) error {
 	}
 
 	// more than TmpOutputDataBuffer bytes in output. must use tmpfile
+	if opts.ImmediateOutput {
+		panic("code assumes immediate output case does not use tmpfile")
+	}
 	if err != nil {
 		return errors.Wrapf(err, "run cmd #%d: %s", c.ID, c.Cmd)
 	}
@@ -454,7 +645,7 @@ func (c *Command) run(opts *Options) error {
 	}
 
 	btmp := bufio.NewWriter(c.tmpfh)
-	_, err = io.CopyBuffer(btmp, bpipe, readed)
+	_, err = io.CopyBuffer(btmp, outPipe, readed)
 	if err != nil {
 		return errors.Wrapf(err, "save buffered data to tmpfile: %s", c.tmpfile)
 	}
@@ -494,6 +685,10 @@ type Options struct {
 	KeepOrder           bool          // keep output order
 	Retries             int           // max retry chances
 	RetryInterval       time.Duration // retry interval
+	OutFileHandle       *os.File      // where to send stdout
+	ErrFileHandle       *os.File      // where to send stderr
+	ImmediateOutput     bool          // print output immediately and interleaved
+	ImmediateLock       sync.Mutex    // make immediate output thread-safe and do one write at a time
 	PrintRetryOutput    bool          // print output from retries
 	Timeout             time.Duration // timeout
 	StopOnErr           bool          // stop on any error
@@ -711,7 +906,8 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 				chances := opts.Retries
 				var outputsToPrint []<-chan string
 				for {
-					ch, err := command.Run(opts)
+					tryNumber := opts.Retries - chances + 1
+					ch, err := command.Run(opts, tryNumber)
 					if err != nil { // fail to run
 						if chances == 0 || opts.StopOnErr {
 							// print final output
@@ -752,8 +948,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 							}
 							if Verbose && opts.Retries > 0 {
 								Log.Warningf("retry %d/%d times: %s",
-									opts.Retries-chances+1,
-									opts.Retries, command.Cmd)
+									tryNumber,
+									opts.Retries,
+									command.Cmd)
 							}
 							chances--
 							<-time.After(opts.RetryInterval)
