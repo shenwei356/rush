@@ -395,7 +395,8 @@ func (lw *ImmediateLineWriter) WritePrefixedLines(input string, outfh *os.File) 
 		// only include prefixes if jobs are running in parallel
 		if lw.numJobs > 1 {
 			var output string
-			reg := regexp.MustCompile("[\r\n]")
+			// split by \r\n or \n
+			reg := regexp.MustCompile("(?:\r\n|\n)")
 			matchExtents := reg.FindAllStringIndex(input, -1)
 			if len(matchExtents) > 0 {
 				// use runes below, so we work correctly with unicode strings
