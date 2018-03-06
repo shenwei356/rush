@@ -29,6 +29,7 @@ complex workflows in fields like Bioinformatics (see [examples](#examples) 18).
 - [Usage](#usage)
 - [Examples](#examples)
 - [Special Cases](#special-cases)
+- [Contributors](#contributors)
 - [Acknowledgements](#acknowledgements)
 - [Contact](#contact)
 - [License](#license)
@@ -512,6 +513,10 @@ Flags:
         $ seq 1 | rush 'echo abc | grep 123'
         [ERRO] wait cmd #1: echo abc | grep 123: exit status 1
         $ seq 1 | rush 'echo abc | grep 123 || true'
+
+## Contributors
+
+- [Brian Burgin](https://github.com/bburgin)
 
 ## Acknowledgements
 
