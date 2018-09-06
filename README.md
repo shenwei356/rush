@@ -29,6 +29,7 @@ complex workflows in fields like Bioinformatics (see [examples](#examples) 18).
 - [Usage](#usage)
 - [Examples](#examples)
 - [Special Cases](#special-cases)
+- [Contributors](#contributors)
 - [Acknowledgements](#acknowledgements)
 - [Contact](#contact)
 - [License](#license)
@@ -96,19 +97,19 @@ Note that speed is not the #.1 target, especially for processes that last long.
 
 #### Method 1: Download binaries
 
-[rush v0.2.0](https://github.com/shenwei356/rush/releases/tag/v0.2.0)
-[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.2.0/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.2.0)
+[rush v0.3.0](https://github.com/shenwei356/rush/releases/tag/v0.3.0)
+[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.3.0/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.3.0)
 
 ***Tip: run `rush -V` to check update !!!***
 
-OS     |Arch      |File, (mirror为中国用户下载镜像链接)                                                                                                                                                                         |Download Count
+OS     |Arch      |File, (中国镜像)                                                                                                                                                                         |Download Count
 :------|:---------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_linux_386.tar.gz)
-Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_linux_amd64.tar.gz)
-OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_darwin_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_386.tar.gz))                         |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_darwin_386.tar.gz)
-OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_darwin_amd64.tar.gz)
-Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_windows_386.exe.tar.gz)
-Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.2.0/rush_windows_amd64.exe.tar.gz)
+Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_linux_386.tar.gz)
+Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_linux_amd64.tar.gz)
+OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_darwin_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_386.tar.gz))                         |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_darwin_386.tar.gz)
+OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_darwin_amd64.tar.gz)
+Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_windows_386.exe.tar.gz)
+Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.3.0/rush_windows_amd64.exe.tar.gz)
 
 
 Just [download](https://github.com/shenwei356/rush/releases) compressed
@@ -140,7 +141,7 @@ And then:
 ```
 rush -- a cross-platform command-line tool for executing jobs in parallel
 
-Version: 0.2.0
+Version: 0.3.0
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -212,8 +213,11 @@ Flags:
   -i, --infile strings            input data file, multi-values supported
   -j, --jobs int                  run n jobs in parallel (default value depends on your device) (default 4)
   -k, --keep-order                keep output in order of input
+      --kill-on-ctrl-c            kill child processes on ctrl-c (default true)
   -n, --nrecords int              number of records sent to a command (default 1)
   -o, --out-file string           out file ("-" for stdout) (default "-")
+      --print-retry-output        print output from retry commands (default true)
+      --propagate-exit-status     propagate child exit status up to the exit status of rush (default true)
   -D, --record-delimiter string   record delimiter (default is "\n") (default "\n")
   -J, --records-join-sep string   record separator for joining multi-records (default is "\n") (default "\n")
   -r, --retries int               maximum retries (default 0)
@@ -224,7 +228,6 @@ Flags:
   -T, --trim string               trim white space (" \t\r\n") in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)
       --verbose                   print verbose information
   -V, --version                   print version information and check for update
-
 ```
 
 
@@ -511,11 +514,18 @@ Flags:
         [ERRO] wait cmd #1: echo abc | grep 123: exit status 1
         $ seq 1 | rush 'echo abc | grep 123 || true'
 
+## Contributors
+
+- [Brian Burgin](https://github.com/bburgin)
+
 ## Acknowledgements
 
 Specially thank [@brentp](https://github.com/brentp)
 and his [gargs](https://github.com/brentp/gargs), from which `rush` borrows
 some ideas.
+
+Thank [@bburgin](https://github.com/bburgin) for his contribution on improvement
+of child process management.
 
 ## Contact
 
