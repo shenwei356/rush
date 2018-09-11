@@ -32,7 +32,6 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,7 +40,6 @@ import (
 	"github.com/cznic/sortutil"
 	"github.com/pkg/errors"
 	"github.com/shenwei356/go-logging"
-	psutil "github.com/shirou/gopsutil/process"
 )
 
 // Log is *logging.Logger
@@ -269,47 +267,6 @@ func (c *Command) getExitStatus(err error) int {
 	return 0
 }
 
-func isProcessRunning(pid int) bool {
-	_, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return true
-}
-
-// ensure Windows processes go away
-func killWindowsProcessTreeRecursive(childProcess *psutil.Process) {
-	grandChildren, err := childProcess.Children()
-	if grandChildren != nil && err == nil {
-		for _, value := range grandChildren {
-			killWindowsProcessTreeRecursive(value)
-		}
-	}
-	attempts := 1
-	for {
-		if Verbose {
-			Log.Infof("taskkill /t /f /pid %s", strconv.Itoa(int(childProcess.Pid)))
-		}
-		out, err := exec.Command("taskkill", "/t", "/f", "/pid", strconv.Itoa(int(childProcess.Pid))).Output()
-		if Verbose {
-			if err != nil {
-				Log.Error(err)
-			}
-			Log.Infof("%s", out)
-		}
-
-		if !isProcessRunning(int(childProcess.Pid)) {
-			break
-		} else {
-			time.Sleep(10 * time.Millisecond)
-			attempts += 1
-			if attempts > 30 {
-				break
-			}
-		}
-	}
-}
-
 type TopLevelEnum int
 
 const (
@@ -491,14 +448,14 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 		c.ctx, c.ctxCancel = context.WithTimeout(context.Background(), c.Timeout)
 		if isWindows {
 			command = exec.CommandContext(c.ctx, getShell())
-			c.setWindowsCommandAttr(command, qcmd)
+			c.setWindowsCommandFields(command, qcmd)
 		} else {
 			command = exec.CommandContext(c.ctx, getShell(), "-c", qcmd)
 		}
 	} else {
 		if isWindows {
 			command = exec.Command(getShell())
-			c.setWindowsCommandAttr(command, qcmd)
+			c.setWindowsCommandFields(command, qcmd)
 		} else {
 			command = exec.Command(getShell(), "-c", qcmd)
 		}
@@ -540,17 +497,6 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 				Log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
 			}
 			chErr <- ErrCancelled
-			if opts.KillOnCtrlC {
-				if isWindows {
-					childProcess, err := psutil.NewProcess(int32(command.Process.Pid))
-					if err != nil {
-						Log.Error(err)
-					}
-					killWindowsProcessTreeRecursive(childProcess)
-				} else {
-					command.Process.Kill()
-				}
-			}
 		case <-chCancelMonitor:
 			// default:  // must not use default, if you must use, use for loop
 		}

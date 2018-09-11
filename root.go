@@ -38,6 +38,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var isWindows bool = runtime.GOOS == "windows"
+
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "rush",
@@ -355,6 +357,15 @@ Homepage: https://github.com/shenwei356/rush
 				case <-cancel: // already closed
 				default:
 					close(cancel)
+				}
+				if opts.KillOnCtrlC {
+					if isWindows {
+						// kill any child processes
+						childrenWereStopped := process.KillWindowsChildProcesses()
+						if !childrenWereStopped {
+							checkError(fmt.Errorf("could not stop children"))
+						}
+					}
 				}
 				cleanupDone <- 1
 				return

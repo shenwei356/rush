@@ -26,9 +26,17 @@ import (
 	"os/exec"
 )
 
-func (c *Command) setWindowsCommandAttr(command *exec.Cmd, qcmd string) {
+func KillWindowsChildProcesses() (childrenWereStopped bool) {
 	if isWindows {
-		panic("should have called process_windows.go setWindowsCommandAttr()!")
+		panic("should have called process_windows.go KillWindowsChildProcesses()!")
+	} else {
+		// noop for all platforms except windows
+	}
+}
+
+func (c *Command) setWindowsCommandFields(command *exec.Cmd, qcmd string) {
+	if isWindows {
+		panic("should have called process_windows.go setWindowsCommandFields()!")
 	} else {
 		// noop for all platforms except windows
 	}
