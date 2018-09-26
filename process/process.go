@@ -1186,7 +1186,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 	if opts.RecordSuccessfulCmd {
 		chSuccessfulCmd = make(chan string, opts.Jobs)
 	}
-	done := make(chan int, opts.Jobs)
+	done := make(chan int)
 	var chExitStatus chan int
 	if opts.PropExitStatus {
 		chExitStatus = make(chan int, opts.Jobs)
@@ -1258,14 +1258,13 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 										Log.Error("stop on first error")
 									}
 									err = stopChildProcesses(opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
-									if err != nil {
+                                    if err != nil {
 										if Verbose {
 											Log.Error(err)
 										}
 										os.Exit(1)
 									}
 								})
-								done <- 1
 							}
 
 							stop = true
