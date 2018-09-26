@@ -1258,7 +1258,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 										Log.Error("stop on first error")
 									}
 									err = stopChildProcesses(opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
-                                    if err != nil {
+									if err != nil {
 										if Verbose {
 											Log.Error(err)
 										}
