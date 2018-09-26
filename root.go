@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bburgin/rush/process"
 	"github.com/pkg/errors"
+	"github.com/shenwei356/rush/process"
 	"github.com/shenwei356/util/stringutil"
 	"github.com/shenwei356/xopen"
 	"github.com/spf13/cobra"
