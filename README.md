@@ -204,6 +204,7 @@ Examples:
 
 Flags:
   -v, --assign strings            assign the value val to the variable var (format: var=val, val also supports replacement strings)
+      --cleanup-time              time to allow child processes to clean up between stop / kill signals (unit: seconds, 0 for no time) (default 3)
   -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves data so we can continue jobs next time; 3) if the file exists, rush ignores jobs in it and update the file
       --dry-run                   print command but not run
   -q, --escape                    escape special symbols like $ which you can customize by flag -Q/--escape-symbols
@@ -213,7 +214,8 @@ Flags:
   -i, --infile strings            input data file, multi-values supported
   -j, --jobs int                  run n jobs in parallel (default value depends on your device) (default 4)
   -k, --keep-order                keep output in order of input
-      --kill-on-ctrl-c            kill child processes on ctrl-c (default true)
+      --no-stop-exes              exe names to exclude from stop signal, example: mspdbsrv.exe; or use all for all exes (default none)
+      --no-kill-exes              exe names to exclude from kill signal, example: mspdbsrv.exe; or use all for all exes (default none)
   -n, --nrecords int              number of records sent to a command (default 1)
   -o, --out-file string           out file ("-" for stdout) (default "-")
       --print-retry-output        print output from retry commands (default true)

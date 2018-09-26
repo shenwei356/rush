@@ -30,7 +30,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,6 +45,9 @@ import (
 
 // Log is *logging.Logger
 var Log *logging.Logger
+
+// pid_numSecondsSinceEpoch
+var ChildMarker string = strconv.Itoa(os.Getpid()) + "_" + strconv.FormatInt(time.Now().Unix(), 16)
 
 func init() {
 	if Log == nil {
@@ -126,7 +128,12 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	var readErr error = nil
 
 	if Verbose {
-		Log.Infof("finish cmd #%d in %s: %s", c.ID, c.Duration, c.Cmd)
+		if c.exitStatus == 0 {
+			Log.Infof("finish cmd #%d in %s: %s: exit status %d", c.ID, c.Duration, c.Cmd, c.exitStatus)
+		} else {
+			// exitStatus will appear in wait cmd message
+			Log.Infof("finish cmd #%d in %s: %s", c.ID, c.Duration, c.Cmd)
+		}
 	}
 
 	go func() {
@@ -214,24 +221,6 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	}
 }
 
-var isWindows bool = runtime.GOOS == "windows"
-
-func getShell() string {
-	var shell string
-	if isWindows {
-		shell = os.Getenv("COMSPEC")
-		if shell == "" {
-			shell = "C:\\WINDOWS\\System32\\cmd.exe"
-		}
-	} else {
-		shell = os.Getenv("SHELL")
-		if shell == "" {
-			shell = "sh"
-		}
-	}
-	return shell
-}
-
 // Cleanup removes tmpfile
 func (c *Command) Cleanup() error {
 	var err error
@@ -267,47 +256,6 @@ func (c *Command) getExitStatus(err error) int {
 	}
 	// no error, so return exitStatus 0
 	return 0
-}
-
-func isProcessRunning(pid int) bool {
-	_, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return true
-}
-
-// ensure Windows processes go away
-func killWindowsProcessTreeRecursive(childProcess *psutil.Process) {
-	grandChildren, err := childProcess.Children()
-	if grandChildren != nil && err == nil {
-		for _, value := range grandChildren {
-			killWindowsProcessTreeRecursive(value)
-		}
-	}
-	attempts := 1
-	for {
-		if Verbose {
-			Log.Infof("taskkill /t /f /pid %s", strconv.Itoa(int(childProcess.Pid)))
-		}
-		out, err := exec.Command("taskkill", "/t", "/f", "/pid", strconv.Itoa(int(childProcess.Pid))).Output()
-		if Verbose {
-			if err != nil {
-				Log.Error(err)
-			}
-			Log.Infof("%s", out)
-		}
-
-		if !isProcessRunning(int(childProcess.Pid)) {
-			break
-		} else {
-			time.Sleep(10 * time.Millisecond)
-			attempts += 1
-			if attempts > 30 {
-				break
-			}
-		}
-	}
 }
 
 type TopLevelEnum int
@@ -470,6 +418,377 @@ func (iw ImmediateWriter) Write(p []byte) (n int, err error) {
 	return dataLen, nil
 }
 
+// from https://softwareengineering.stackexchange.com/questions/177428/sets-data-structure-in-golang
+type IntSet struct {
+	set map[int]bool
+}
+
+func (set *IntSet) Add(i int) bool {
+	_, found := set.set[i]
+	set.set[i] = true
+	return !found //False if it existed already
+}
+
+const (
+	INVALID_HANDLE int = 0
+
+	CTRL_C_SIGNAL     int = 0
+	CTRL_BREAK_SIGNAL int = 1
+	KILL_SIGNAL       int = 2
+
+	// bit mask
+	SEND_NO_SIGNAL         int = 0
+	SEND_CTRL_C_SIGNAL     int = 1
+	SEND_CTRL_BREAK_SIGNAL int = 2
+	SEND_KILL_SIGNAL       int = 4
+)
+
+func canSendSignal(childProcessName string, noSignalExes []string) (canSendSignal bool, err error) {
+	canSendSignal = true // first assume true
+	err = nil            // first assume no error
+	if len(noSignalExes) > 0 {
+		for _, noSignalExe := range noSignalExes {
+			if noSignalExe == "all" {
+				canSendSignal = false
+				break
+			} else {
+				if childProcessName == noSignalExe {
+					canSendSignal = false
+					break
+				}
+			}
+		}
+	}
+	return canSendSignal, err
+}
+
+func checkChildProcess(childProcess *psutil.Process, noStopExes []string, noKillExes []string) (processHandle int, considerChild bool, signalsToSend int, err error) {
+	considerChild = false          // first assume false
+	signalsToSend = SEND_NO_SIGNAL // first assume no signal
+	// use err2 for getProcess, since child may no longer exist
+	processHandle, processExists, accessGranted, err2 := getProcess(int(childProcess.Pid))
+	if err2 == nil {
+		if processHandle != INVALID_HANDLE {
+			considerChild, err = doesChildHaveMarker(processHandle)
+			if err == nil {
+				if considerChild {
+					var childProcessName string = ""
+					if len(noStopExes) > 0 || len(noKillExes) > 0 {
+						childProcessName, err = childProcess.Name()
+						if err == nil {
+							if len(childProcessName) == 0 {
+								err = errors.New("childProcessName is empty")
+							}
+						}
+						if err != nil {
+							if Verbose {
+								Log.Error(err)
+							}
+						}
+					}
+					signalsToSend, err = getSignalsToSend(childProcessName, noStopExes, noKillExes)
+				}
+			} else {
+				if Verbose {
+					Log.Error(err)
+				}
+			}
+		} else {
+			// failed to open child process, so don't consider it
+		}
+	} else {
+		// failed to open child process, so don't consider it
+		// check response
+		if processExists {
+			if accessGranted {
+				// report errors from processes we could access
+				if Verbose {
+					Log.Error(err2)
+				}
+			} else { // access denied
+				// ignore error, since we failed to get a handle to the child
+				// it could be a system process that we are skipping anyway
+			}
+		} else { // process no longer exists
+			// ignore error since no process to signal
+		}
+	}
+	return processHandle, considerChild, signalsToSend, err
+}
+
+type ProcessRecord struct {
+	processHandle int
+	pid           int
+	signalsToSend int
+}
+
+// get process tree in bottom up order
+func getProcessTreeRecursive(
+	childProcess *psutil.Process,
+	noStopExes []string,
+	noKillExes []string,
+	pidsVisited *IntSet,
+) (processRecords []ProcessRecord) {
+	if considerPid(int(childProcess.Pid)) {
+		// avoid cycles in pid tree by looking at visited set
+		if pidsVisited.Add(int(childProcess.Pid)) {
+			processHandle, considerChild, signalsToSend, err := checkChildProcess(childProcess, noStopExes, noKillExes)
+			if err != nil {
+				if Verbose {
+					Log.Error(err)
+				}
+			}
+			if processHandle != INVALID_HANDLE {
+				if considerChild {
+					grandChildren, err := childProcess.Children()
+					if err != nil {
+						if err == psutil.ErrorNoChildren {
+							// ignore this error
+							err = nil
+						} else {
+							if Verbose {
+								Log.Error(err)
+							}
+						}
+					} else {
+						if grandChildren != nil {
+							for _, grandChildProcess := range grandChildren {
+								subProcessRecords := getProcessTreeRecursive(
+									grandChildProcess,
+									noStopExes,
+									noKillExes,
+									pidsVisited)
+								for _, subProcessRecord := range subProcessRecords {
+									processRecords = append(processRecords, subProcessRecord)
+								}
+							}
+						}
+					}
+					var processRecord = ProcessRecord{
+						processHandle: processHandle, pid: int(childProcess.Pid), signalsToSend: signalsToSend}
+					processRecords = append(processRecords, processRecord)
+				} else {
+					releaseProcess(processHandle)
+				}
+			}
+		}
+	}
+	return processRecords
+}
+
+func getChildProcesses(noStopExes []string, noKillExes []string) (processRecords []ProcessRecord) {
+	// get any child processes that were spawned from our env
+	processes, err := psutil.Processes()
+	if err == nil {
+		if processes != nil {
+			pidsVisited := IntSet{set: make(map[int]bool)}
+			for _, process := range processes {
+				subProcessRecords := getProcessTreeRecursive(
+					process,
+					noStopExes,
+					noKillExes,
+					&pidsVisited)
+				for _, subProcessRecord := range subProcessRecords {
+					processRecords = append(processRecords, subProcessRecord)
+				}
+			}
+		}
+	} else {
+		if Verbose {
+			Log.Error(err)
+		}
+	}
+	return processRecords
+}
+
+func signalChildProcesses(processRecords []ProcessRecord, signalNum int) (numChildrenSignaled int) {
+	// signal child processes
+	numChildrenSignaled = 0
+	expectedNumChildrenSignaled := 0
+	for _, processRecord := range processRecords {
+		sendSignal := false // first assume false
+		switch signalNum {
+		case CTRL_C_SIGNAL:
+			if processRecord.signalsToSend&SEND_CTRL_C_SIGNAL != 0 {
+				sendSignal = true
+			}
+		case CTRL_BREAK_SIGNAL:
+			if processRecord.signalsToSend&SEND_CTRL_BREAK_SIGNAL != 0 {
+				sendSignal = true
+			}
+		case KILL_SIGNAL:
+			if processRecord.signalsToSend&SEND_KILL_SIGNAL != 0 {
+				sendSignal = true
+			}
+		default:
+			Log.Error(errors.New("Unexpected signalNum"))
+		}
+		if sendSignal {
+			expectedNumChildrenSignaled += 1
+			err := signalProcess(processRecord, signalNum)
+			if err == nil {
+				numChildrenSignaled += 1
+			} else {
+				if Verbose {
+					Log.Error(err)
+				}
+			}
+		}
+	}
+	if expectedNumChildrenSignaled > 0 && numChildrenSignaled == 0 {
+		switch signalNum {
+		case CTRL_C_SIGNAL:
+			Log.Error("no child processes sent Ctrl+C signal")
+		case CTRL_BREAK_SIGNAL:
+			Log.Error("no child processes sent Ctrl+Break signal")
+		case KILL_SIGNAL:
+			Log.Error("no child processes killed")
+		default:
+			Log.Error(errors.New("Unexpected signalNum"))
+		}
+	}
+	return numChildrenSignaled
+}
+
+func anyRemainingChildren(processRecords []ProcessRecord) (anyRemaining bool) {
+	anyRemaining = false
+	for _, processRecord := range processRecords {
+		if doesProcessExist(processRecord.processHandle) {
+			anyRemaining = true
+			break
+		}
+	}
+	return anyRemaining
+}
+
+func pollRemainingChildren(processRecords []ProcessRecord, cleanupTime time.Duration) (anyRemaining bool) {
+	anyRemaining = false
+	startTime := time.Now()
+	sleepTime := 250 * time.Millisecond
+	for {
+		continuePolling := false
+		anyRemaining = anyRemainingChildren(processRecords)
+		if anyRemaining && cleanupTime > 0 {
+			time.Sleep(sleepTime)
+			elapsedTime := time.Since(startTime)
+			if elapsedTime < cleanupTime {
+				// exponential back off with limit:
+				// increase sleep time if next elapsedTime is below 1/2 of cleanupTime
+				if elapsedTime+sleepTime*2 < cleanupTime/2 {
+					// exponential back off
+					sleepTime *= 2
+				} else {
+					// use the same sleepTime as before
+				}
+				continuePolling = true
+			}
+		}
+		if !continuePolling {
+			break
+		}
+	}
+	return anyRemaining
+}
+
+func pollKillProcess(processRecord ProcessRecord) (err error) {
+	if doesProcessExist(processRecord.processHandle) {
+		attempts := 0
+		for {
+			continuePolling := false
+			err = killProcess(processRecord)
+			if doesProcessExist(processRecord.processHandle) {
+				if attempts < 30 {
+					continuePolling = true
+				} else {
+					// timed out
+					err = errors.New(
+						fmt.Sprintf("Timed out trying to kill child process, pid %d", processRecord.pid))
+				}
+			}
+			if continuePolling {
+				// don't use exponential back off here
+				// since want to fail out after fixed number of attempts
+				time.Sleep(250 * time.Millisecond)
+				attempts += 1
+			} else {
+				break
+			}
+		}
+	}
+	return err
+}
+
+// ensure our child processes are stopped
+func stopChildProcesses(noStopExes []string, noKillExes []string, cleanupTime time.Duration) (err error) {
+	err = nil            // first assume no error
+	anyRemaining := true // first assume some children
+	totalNumSignaled := 0
+	if canStopChildProcesses() {
+		processRecords := getChildProcesses(noStopExes, noKillExes)
+		// progress from most graceful to most invasive stop signal
+		// if no matching children, then call is a noop
+		numSignaled := signalChildProcesses(processRecords, CTRL_C_SIGNAL)
+		if numSignaled > 0 {
+			totalNumSignaled += numSignaled
+			anyRemaining = pollRemainingChildren(processRecords, cleanupTime)
+		} else {
+			anyRemaining = true
+		}
+		if anyRemaining {
+			numSignaled = signalChildProcesses(processRecords, CTRL_BREAK_SIGNAL)
+			if numSignaled > 0 {
+				totalNumSignaled += numSignaled
+				anyRemaining = pollRemainingChildren(processRecords, cleanupTime)
+			} else {
+				anyRemaining = true
+			}
+			if anyRemaining {
+				numSignaled = signalChildProcesses(processRecords, KILL_SIGNAL)
+				totalNumSignaled += numSignaled
+			}
+		}
+		anyRemaining = pollRemainingChildren(processRecords, 0) // wait zero time, since already waited above
+		releaseProcesses(processRecords)
+	}
+	if anyRemaining && totalNumSignaled == 0 {
+		msg := "No child processes stopped or killed\n"
+		msg += "       " // seven spaces indent
+		msg += "You will need to manually stop or kill them"
+		err = errors.New(msg)
+	}
+	return err
+}
+
+func releaseProcesses(processRecords []ProcessRecord) {
+	for _, processRecord := range processRecords {
+		releaseProcess(processRecord.processHandle)
+	}
+}
+
+func getChildMarkerKey() string {
+	return "RUSH_CHILD_GROUP"
+}
+
+func getChildMarkerValue() string {
+	// place brackets on either side of the marker,
+	// so we only find exact matches
+	return "[" + ChildMarker + "]"
+}
+
+func getChildMarkerRegex() *regexp.Regexp {
+	// match string with one or more [pid_timestamp] values
+	return regexp.MustCompile(getChildMarkerKey() + "=\\[[0-z]+\\]")
+}
+
+func containsMarker(env string) bool {
+	childMarkerRegex := getChildMarkerRegex()
+	childMarkerValue := getChildMarkerValue()
+	match := childMarkerRegex.FindString(env)
+	return strings.Contains(match, childMarkerValue)
+}
+
+var stopOnce sync.Once
+
 // run a command and pass output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
@@ -484,25 +803,30 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 	var command *exec.Cmd
 	qcmd := fmt.Sprintf(`%s`, c.Cmd)
 	if Verbose {
-		Log.Infof("start  cmd #%d: %s", c.ID, qcmd)
+		Log.Infof("start cmd #%d: %s", c.ID, qcmd)
 	}
 
 	if c.Timeout > 0 {
 		c.ctx, c.ctxCancel = context.WithTimeout(context.Background(), c.Timeout)
-		if isWindows {
-			command = exec.CommandContext(c.ctx, getShell())
-			c.setWindowsCommandAttr(command, qcmd)
-		} else {
-			command = exec.CommandContext(c.ctx, getShell(), "-c", qcmd)
-		}
+		command = getCommand(c.ctx, qcmd)
 	} else {
-		if isWindows {
-			command = exec.Command(getShell())
-			c.setWindowsCommandAttr(command, qcmd)
-		} else {
-			command = exec.Command(getShell(), "-c", qcmd)
-		}
+		command = getCommand(nil, qcmd)
 	}
+
+	// mark child processes with our pid,
+	// so we can identify them later,
+	// in case we need to signal them
+	childMarkerKey := getChildMarkerKey()
+	childMarkerValue := getChildMarkerValue()
+	priorValue, found := os.LookupEnv(childMarkerKey)
+	if found {
+		// append marker values to sames key, so
+		// we can handle the nested calls case
+		childMarkerValue = priorValue + childMarkerValue
+	}
+	childMarker := fmt.Sprintf("%s=%s", childMarkerKey, childMarkerValue)
+	// command de-dups variables, in favor of later values
+	command.Env = append(os.Environ(), childMarker)
 
 	var pipeStdout io.ReadCloser = nil
 	var err error = nil
@@ -540,17 +864,17 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 				Log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
 			}
 			chErr <- ErrCancelled
-			if opts.KillOnCtrlC {
-				if isWindows {
-					childProcess, err := psutil.NewProcess(int32(command.Process.Pid))
-					if err != nil {
+			// ensure we only initiate the stop attempt once,
+			// from all our command threads
+			stopOnce.Do(func() {
+				err = stopChildProcesses(opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
+				if err != nil {
+					if Verbose {
 						Log.Error(err)
 					}
-					killWindowsProcessTreeRecursive(childProcess)
-				} else {
-					command.Process.Kill()
+					os.Exit(1)
 				}
-			}
+			})
 		case <-chCancelMonitor:
 			// default:  // must not use default, if you must use, use for loop
 		}
@@ -693,8 +1017,10 @@ type Options struct {
 	PrintRetryOutput    bool          // print output from retries
 	Timeout             time.Duration // timeout
 	StopOnErr           bool          // stop on any error
+	NoStopExes          []string      // exe names to exclude from stop signal
+	NoKillExes          []string      // exe names to exclude from kill signal
+	CleanupTime         time.Duration // time to allow children to clean up
 	PropExitStatus      bool          // propagate child exit status
-	KillOnCtrlC         bool          // kill child processes on ctrl-c
 	RecordSuccessfulCmd bool          // send successful command to channel
 	Verbose             bool
 }
@@ -720,9 +1046,6 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 			for c := range chCmd {
 				select {
 				case <-cancel:
-					if Verbose {
-						Log.Debugf("cancel receiving finished cmd")
-					}
 					break RECEIVECMD
 				default: // needed
 				}
@@ -866,7 +1189,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 	done := make(chan int)
 	var chExitStatus chan int
 	if opts.PropExitStatus {
-		chExitStatus = make(chan int)
+		chExitStatus = make(chan int, opts.Jobs)
 	}
 
 	go func() {
@@ -928,16 +1251,20 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 							select {
 							case <-cancel: // already closed
 							default:
-								Log.Error("stop on first error(s)")
-								close(cancel)
-								close(chCmd)
-								if opts.RecordSuccessfulCmd {
-									close(chSuccessfulCmd)
-								}
-								if opts.PropExitStatus {
-									close(chExitStatus)
-								}
-								done <- 1
+								// ensure we only initiate the stop attempt once,
+								// from all our command threads
+								stopOnce.Do(func() {
+									if opts.StopOnErr {
+										Log.Error("stop on first error")
+									}
+									err = stopChildProcesses(opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
+									if err != nil {
+										if Verbose {
+											Log.Error(err)
+										}
+										os.Exit(1)
+									}
+								})
 							}
 
 							stop = true
@@ -978,13 +1305,11 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 			id++
 		}
 		wg.Wait()
-		if !stop {
-			close(chCmd)
-			if opts.RecordSuccessfulCmd {
-				close(chSuccessfulCmd)
-			}
-		}
 
+		close(chCmd)
+		if opts.RecordSuccessfulCmd {
+			close(chSuccessfulCmd)
+		}
 		if opts.PropExitStatus {
 			close(chExitStatus)
 		}
