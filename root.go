@@ -38,8 +38,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var isWindows bool = runtime.GOOS == "windows"
-
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "rush",
@@ -142,8 +140,10 @@ Homepage: https://github.com/shenwei356/rush
 			PrintRetryOutput:    config.PrintRetryOutput,
 			Timeout:             time.Duration(config.Timeout) * time.Second,
 			StopOnErr:           config.StopOnErr,
+			NoStopExes:          config.NoStopExes,
+			NoKillExes:          config.NoKillExes,
+			CleanupTime:         time.Duration(config.CleanupTime) * time.Second,
 			PropExitStatus:      config.PropExitStatus,
-			KillOnCtrlC:         config.KillOnCtrlC,
 			Verbose:             config.Verbose,
 			RecordSuccessfulCmd: config.Continue,
 		}
@@ -358,15 +358,6 @@ Homepage: https://github.com/shenwei356/rush
 				default:
 					close(cancel)
 				}
-				if opts.KillOnCtrlC {
-					if isWindows {
-						// kill any child processes
-						childrenWereStopped := process.KillWindowsChildProcesses()
-						if !childrenWereStopped {
-							checkError(fmt.Errorf("could not stop children"))
-						}
-					}
-				}
 				cleanupDone <- 1
 				return
 			case <-chExitSignalMonitor:
@@ -434,12 +425,14 @@ func init() {
 	RootCmd.Flags().IntP("retry-interval", "", 0, "retry interval (unit: second) (default 0)")
 	RootCmd.Flags().BoolP("immediate-output", "", false, "print output immediately and interleaved, to aid debugging")
 	RootCmd.Flags().BoolP("print-retry-output", "", true, "print output from retry commands")
-	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: second, 0 for no timeout) (default 0)")
+	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: seconds, 0 for no timeout) (default 0)")
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
-	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop all processes on first error(s)")
+	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop child processes on first error")
 	RootCmd.Flags().BoolP("propagate-exit-status", "", true, "propagate child exit status up to the exit status of rush")
-	RootCmd.Flags().BoolP("kill-on-ctrl-c", "", true, "kill child processes on ctrl-c")
+	RootCmd.Flags().StringSliceP("no-stop-exes", "", []string{}, "exe names to exclude from stop signal, example: mspdbsrv.exe; or use all for all exes (default none)")
+	RootCmd.Flags().StringSliceP("no-kill-exes", "", []string{}, "exe names to exclude from kill signal, example: mspdbsrv.exe; or use all for all exes (default none)")
+	RootCmd.Flags().IntP("cleanup-time", "", 3, "time to allow child processes to clean up between stop / kill signals (unit: seconds, 0 for no time) (default 3)")
 	RootCmd.Flags().BoolP("dry-run", "", false, "print command but not run")
 
 	RootCmd.Flags().BoolP("continue", "c", false, `continue jobs.`+
@@ -559,8 +552,10 @@ type Config struct {
 
 	KeepOrder      bool
 	StopOnErr      bool
+	NoStopExes     []string
+	NoKillExes     []string
+	CleanupTime    int
 	PropExitStatus bool
-	KillOnCtrlC    bool
 	DryRun         bool
 
 	Continue    bool
@@ -628,8 +623,10 @@ func getConfigs(cmd *cobra.Command) Config {
 
 		KeepOrder:      getFlagBool(cmd, "keep-order"),
 		StopOnErr:      getFlagBool(cmd, "stop-on-error"),
+		NoStopExes:     getFlagStringSlice(cmd, "no-stop-exes"),
+		NoKillExes:     getFlagStringSlice(cmd, "no-kill-exes"),
+		CleanupTime:    getFlagNonNegativeInt(cmd, "cleanup-time"),
 		PropExitStatus: getFlagBool(cmd, "propagate-exit-status"),
-		KillOnCtrlC:    getFlagBool(cmd, "kill-on-ctrl-c"),
 		DryRun:         getFlagBool(cmd, "dry-run"),
 
 		Continue:    getFlagBool(cmd, "continue"),
