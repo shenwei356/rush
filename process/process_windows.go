@@ -49,6 +49,7 @@ var (
 	procGetSystemWow64DirectoryW = modkernel32.NewProc("GetSystemWow64DirectoryW")
 	procIsWow64Process           = modkernel32.NewProc("IsWow64Process")
 	procOpenProcess              = modkernel32.NewProc("OpenProcess")
+	procGetProcessTimes          = modkernel32.NewProc("GetProcessTimes")
 	procVirtualAllocEx           = modkernel32.NewProc("VirtualAllocEx")
 	procVirtualFreeEx            = modkernel32.NewProc("VirtualFreeEx")
 	procVirtualQueryEx           = modkernel32.NewProc("VirtualQueryEx")
@@ -141,6 +142,14 @@ func openProcess(da uint32, inheritHandle bool, pid uint32) (handle syscall.Hand
 	return
 }
 
+func getProcessTimes(handle syscall.Handle, creationTime *syscall.Filetime, exitTime *syscall.Filetime, kernelTime *syscall.Filetime, userTime *syscall.Filetime) (err error) {
+	r1, _, e1 := syscall.Syscall6(procGetProcessTimes.Addr(), 5, uintptr(handle), uintptr(unsafe.Pointer(creationTime)), uintptr(unsafe.Pointer(exitTime)), uintptr(unsafe.Pointer(kernelTime)), uintptr(unsafe.Pointer(userTime)), 0)
+	if r1 == 0 {
+		err = getSyscallErr(e1)
+	}
+	return
+}
+
 func getProcess(pid int) (processHandle int, processExists bool, accessGranted bool, err error) {
 	processExists = false
 	accessGranted = false
@@ -177,7 +186,7 @@ func getProcess(pid int) (processHandle int, processExists bool, accessGranted b
 	return processHandle, processExists, accessGranted, err
 }
 
-func releaseProcess(processHandle int) {
+func releaseProcessByHandle(processHandle int) {
 	syscall.CloseHandle(syscall.Handle(processHandle))
 }
 
@@ -192,6 +201,23 @@ func doesProcessExist(processHandle int) (processExists bool) {
 		}
 	}
 	return processExists
+}
+
+func _getProcessStartTime(processHandle int) (startTime uint64, err error) {
+	var times syscall.Rusage
+	err = getProcessTimes(
+		syscall.Handle(processHandle),
+		&times.CreationTime,
+		&times.ExitTime,
+		&times.KernelTime,
+		&times.UserTime,
+	)
+	// from https://github.com/cloudfoundry/gosigar/blob/master/sigar_windows.go
+	// Windows epoch times are expressed as time elapsed since midnight on
+	// January 1, 1601 at Greenwich, England. This converts the Filetime to
+	// unix epoch in milliseconds.
+	startTime = uint64(times.CreationTime.Nanoseconds() / 1e6)
+	return
 }
 
 func waitForSingleObject(handle syscall.Handle, waitMilliseconds uint32) (event uint32, err error) {
