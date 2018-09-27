@@ -462,19 +462,102 @@ func canSendSignal(childProcessName string, noSignalExes []string) (canSendSigna
 	return canSendSignal, err
 }
 
-func checkChildProcess(childProcess *psutil.Process, noStopExes []string, noKillExes []string) (processHandle int, considerChild bool, signalsToSend int, err error) {
+var processHandleStartTimes = make(map[int]uint64)
+
+func getProcessStartTimeFromHandle(processHandle int) (startTime uint64, err error) {
+	startTime, keyPresent := processHandleStartTimes[processHandle]
+	if !keyPresent {
+		startTime, err = _getProcessStartTime(processHandle)
+		processHandleStartTimes[processHandle] = startTime
+	}
+	return
+}
+
+type ProcessRecord struct {
+	pid           int
+	processHandle int
+	processExists bool
+	accessGranted bool
+	signalsToSend int
+}
+
+var pidRecords = make(map[int]ProcessRecord)
+
+func getProcessRecordFromPid(pid int) (processRecord ProcessRecord, err error) {
+	processRecord, keyPresent := pidRecords[pid]
+	if !keyPresent {
+		processHandle, processExists, accessGranted, err := getProcess(pid)
+		if processHandle != INVALID_HANDLE && err == nil {
+			processRecord = ProcessRecord{
+				pid:           pid,
+				processHandle: processHandle,
+				processExists: processExists,
+				accessGranted: accessGranted,
+				signalsToSend: SEND_NO_SIGNAL}
+			pidRecords[pid] = processRecord
+		}
+	}
+	return
+}
+
+func getProcessStartTimeFromPid(pid int) (startTime uint64, err error) {
+	startTime = 0
+	processRecord, err := getProcessRecordFromPid(pid)
+	if processRecord.processHandle != INVALID_HANDLE && err == nil {
+		startTime, err = getProcessStartTimeFromHandle(processRecord.processHandle)
+	}
+	return
+}
+
+type ChildCheckRecord struct {
+	process    *psutil.Process
+	knownChild bool
+}
+
+func checkChildProcess(childCheckRecord ChildCheckRecord, noStopExes []string, noKillExes []string) (
+	processHandle int,
+	considerChild bool,
+	signalsToSend int,
+	err error) {
 	considerChild = false          // first assume false
 	signalsToSend = SEND_NO_SIGNAL // first assume no signal
-	// use err2 for getProcess, since child may no longer exist
-	processHandle, processExists, accessGranted, err2 := getProcess(int(childProcess.Pid))
+	// use err2 for getProcessRecordFromPid(), since child may no longer exist
+	processRecord, err2 := getProcessRecordFromPid(int(childCheckRecord.process.Pid))
+	processHandle = processRecord.processHandle
 	if err2 == nil {
 		if processHandle != INVALID_HANDLE {
-			considerChild, err = doesChildHaveMarker(processHandle)
+			doEnvCheck := true // first assume true
+			if childCheckRecord.knownChild {
+				// use err3 for the next operations, since
+				// we may fallback to env check below
+				processStartTime, err3 := getProcessStartTimeFromHandle(processHandle)
+				if err3 == nil {
+					parentPid, err3 := childCheckRecord.process.Ppid() // get parent pid
+					if err3 == nil {
+						// use err3 for getProcessStartTimeFromPid(), since parent may no longer exist
+						parentStartTime, err3 := getProcessStartTimeFromPid(int(parentPid))
+						if err3 == nil {
+							if processStartTime >= parentStartTime {
+								// this our child and
+								// not from a previous parent with reused pid,
+								// so we can skip the env check
+								doEnvCheck = false
+								considerChild = true
+							}
+						}
+					}
+				}
+			}
+			if doEnvCheck {
+				// handle the orphaned child case
+				// by looking at the env
+				considerChild, err = doesChildHaveMarker(processHandle)
+			}
 			if err == nil {
 				if considerChild {
 					var childProcessName string = ""
 					if len(noStopExes) > 0 || len(noKillExes) > 0 {
-						childProcessName, err = childProcess.Name()
+						childProcessName, err = childCheckRecord.process.Name()
 						if err == nil {
 							if len(childProcessName) == 0 {
 								err = errors.New("childProcessName is empty")
@@ -499,8 +582,8 @@ func checkChildProcess(childProcess *psutil.Process, noStopExes []string, noKill
 	} else {
 		// failed to open child process, so don't consider it
 		// check response
-		if processExists {
-			if accessGranted {
+		if processRecord.processExists {
+			if processRecord.accessGranted {
 				// report errors from processes we could access
 				if Verbose {
 					Log.Error(err2)
@@ -513,26 +596,23 @@ func checkChildProcess(childProcess *psutil.Process, noStopExes []string, noKill
 			// ignore error since no process to signal
 		}
 	}
-	return processHandle, considerChild, signalsToSend, err
-}
-
-type ProcessRecord struct {
-	processHandle int
-	pid           int
-	signalsToSend int
+	return
 }
 
 // get process tree in bottom up order
 func getProcessTreeRecursive(
-	childProcess *psutil.Process,
+	childCheckRecord ChildCheckRecord,
 	noStopExes []string,
 	noKillExes []string,
 	pidsVisited *IntSet,
 ) (processRecords []ProcessRecord) {
-	if considerPid(int(childProcess.Pid)) {
+	if considerPid(int(childCheckRecord.process.Pid)) {
 		// avoid cycles in pid tree by looking at visited set
-		if pidsVisited.Add(int(childProcess.Pid)) {
-			processHandle, considerChild, signalsToSend, err := checkChildProcess(childProcess, noStopExes, noKillExes)
+		if pidsVisited.Add(int(childCheckRecord.process.Pid)) {
+			processHandle, considerChild, signalsToSend, err := checkChildProcess(
+				childCheckRecord,
+				noStopExes,
+				noKillExes)
 			if err != nil {
 				if Verbose {
 					Log.Error(err)
@@ -540,7 +620,7 @@ func getProcessTreeRecursive(
 			}
 			if processHandle != INVALID_HANDLE {
 				if considerChild {
-					grandChildren, err := childProcess.Children()
+					grandChildren, err := childCheckRecord.process.Children()
 					if err != nil {
 						if err == psutil.ErrorNoChildren {
 							// ignore this error
@@ -553,8 +633,10 @@ func getProcessTreeRecursive(
 					} else {
 						if grandChildren != nil {
 							for _, grandChildProcess := range grandChildren {
+								var grandChildCheckRecord = ChildCheckRecord{
+									process: grandChildProcess, knownChild: childCheckRecord.knownChild}
 								subProcessRecords := getProcessTreeRecursive(
-									grandChildProcess,
+									grandChildCheckRecord,
 									noStopExes,
 									noKillExes,
 									pidsVisited)
@@ -565,10 +647,10 @@ func getProcessTreeRecursive(
 						}
 					}
 					var processRecord = ProcessRecord{
-						processHandle: processHandle, pid: int(childProcess.Pid), signalsToSend: signalsToSend}
+						processHandle: processHandle, pid: int(childCheckRecord.process.Pid), signalsToSend: signalsToSend}
 					processRecords = append(processRecords, processRecord)
 				} else {
-					releaseProcess(processHandle)
+					releaseProcessByPid(int(childCheckRecord.process.Pid))
 				}
 			}
 		}
@@ -577,25 +659,66 @@ func getProcessTreeRecursive(
 }
 
 func getChildProcesses(noStopExes []string, noKillExes []string) (processRecords []ProcessRecord) {
-	// get any child processes that were spawned from our env
-	processes, err := psutil.Processes()
+	var childCheckRecords []ChildCheckRecord
+
+	// to handle non-orphaned children, get our immediate children
+	thisProcess, err := psutil.NewProcess(int32(os.Getpid()))
 	if err == nil {
-		if processes != nil {
-			pidsVisited := IntSet{set: make(map[int]bool)}
-			for _, process := range processes {
-				subProcessRecords := getProcessTreeRecursive(
-					process,
-					noStopExes,
-					noKillExes,
-					&pidsVisited)
-				for _, subProcessRecord := range subProcessRecords {
-					processRecords = append(processRecords, subProcessRecord)
+		immediateChildren, err := thisProcess.Children()
+		if err == nil {
+			if immediateChildren != nil {
+				for _, process := range immediateChildren {
+					var childCheckRecord = ChildCheckRecord{
+						process: process, knownChild: true} // process is known to be our child
+					childCheckRecords = append(childCheckRecords, childCheckRecord)
+				}
+			}
+		} else {
+			if err == psutil.ErrorNoChildren {
+				// ignore this error
+				err = nil
+			} else {
+				if Verbose {
+					Log.Error(err)
 				}
 			}
 		}
 	} else {
 		if Verbose {
 			Log.Error(err)
+		}
+	}
+
+	if err == nil {
+		// to handle orphaned children, get all processes
+		// we'll check for duplicates later
+		allProcesses, err := psutil.Processes()
+		if err == nil {
+			if allProcesses != nil {
+				for _, process := range allProcesses {
+					var childCheckRecord = ChildCheckRecord{
+						process: process, knownChild: false} // process may or may not be our child
+					childCheckRecords = append(childCheckRecords, childCheckRecord)
+				}
+			}
+		} else {
+			if Verbose {
+				Log.Error(err)
+			}
+		}
+	}
+
+	if err == nil {
+		pidsVisited := IntSet{set: make(map[int]bool)}
+		for _, childCheckRecord := range childCheckRecords {
+			subProcessRecords := getProcessTreeRecursive(
+				childCheckRecord,
+				noStopExes,
+				noKillExes,
+				&pidsVisited)
+			for _, subProcessRecord := range subProcessRecords {
+				processRecords = append(processRecords, subProcessRecord)
+			}
 		}
 	}
 	return processRecords
@@ -748,7 +871,9 @@ func stopChildProcesses(noStopExes []string, noKillExes []string, cleanupTime ti
 			}
 		}
 		anyRemaining = pollRemainingChildren(processRecords, 0) // wait zero time, since already waited above
-		releaseProcesses(processRecords)
+		// release process handles only after descending into all processes,
+		// to ensure pids do not get reused while descending
+		releaseProcesses()
 	}
 	if anyRemaining && totalNumSignaled == 0 {
 		msg := "No child processes stopped or killed\n"
@@ -759,9 +884,17 @@ func stopChildProcesses(noStopExes []string, noKillExes []string, cleanupTime ti
 	return err
 }
 
-func releaseProcesses(processRecords []ProcessRecord) {
-	for _, processRecord := range processRecords {
-		releaseProcess(processRecord.processHandle)
+func releaseProcessByPid(pid int) {
+	processRecord, keyPresent := pidRecords[pid]
+	if !keyPresent {
+		delete(pidRecords, processRecord.pid)
+		releaseProcessByHandle(processRecord.processHandle)
+	}
+}
+
+func releaseProcesses() {
+	for _, processRecord := range pidRecords {
+		releaseProcessByPid(processRecord.pid)
 	}
 }
 
@@ -1089,9 +1222,6 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 			for c = range chCmd {
 				select {
 				case <-cancel:
-					if Verbose {
-						Log.Debugf("cancel receiving finished cmd")
-					}
 					break RECEIVECMD2
 				default: // needed
 				}
