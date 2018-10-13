@@ -42,8 +42,7 @@ import (
 var RootCmd = &cobra.Command{
 	Use:   "rush",
 	Short: "a cross-platform command-line tool for executing jobs in parallel",
-	Long: fmt.Sprintf(`
-rush -- a cross-platform command-line tool for executing jobs in parallel
+	Long: fmt.Sprintf(`rush -- a cross-platform command-line tool for executing jobs in parallel
 
 Version: %s
 
@@ -428,7 +427,7 @@ func init() {
 	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: seconds, 0 for no timeout) (default 0)")
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
-	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop child processes on first error")
+	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop child processes on first error (not perfect, you may stop it by typing ctrl-c or closing terminal)")
 	RootCmd.Flags().BoolP("propagate-exit-status", "", true, "propagate child exit status up to the exit status of rush")
 	RootCmd.Flags().StringSliceP("no-stop-exes", "", []string{}, "exe names to exclude from stop signal, example: mspdbsrv.exe; or use all for all exes (default none)")
 	RootCmd.Flags().StringSliceP("no-kill-exes", "", []string{}, "exe names to exclude from kill signal, example: mspdbsrv.exe; or use all for all exes (default none)")

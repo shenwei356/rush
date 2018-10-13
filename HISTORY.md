@@ -1,0 +1,78 @@
+- rush v0.4.0
+    - new flags:
+        - `--cleanup-time` allow child processes to clean up between stop / kill signals
+        - `--immediate-output` print output immediately and interleaved, to aid debugging
+        - `--no-kill-exes strings` exe names to exclude from kill signal, example: mspdbsrv.exe; or use all for all exes (default none)
+        - `--no-stop-exes strings` exe names to exclude from stop signal, example: mspdbsrv.exe; or use all for all exes (default none)
+    - removed flags:
+        - `--kill-on-ctrl-c ` kill child processes on ctrl-c (default true)
+    - try to fix for issue [#17](https://github.com/shenwei356/rush/issues/17): rush -e does not kill jobs
+- rush v0.3.0
+    - Added `--propagate-exit-status` command line arg, default true.
+    Propagates child process exit status to rush exit status, so rush fails if a child fails
+    - Added `--print-retry-output` command line arg, default true.
+    Prints child output from retries, so users can see what caused retries
+    - Added `--kill-on-ctrl-c` command line arg, default true
+    Toggles child process kill or not
+    - **For windows if `--kill-on-ctrl-c`, kill whole child process tree, so we don't orphan child processes**
+    - **Modified logic to print child output even if commands failed, so users can see what failed**
+- rush v0.2.0
+    - support escaping special symbols like "$#&`" by flag `-q/--escape`.
+- rush v0.1.9
+    - fix colorful output in Windows
+    - new replacement string `{@regex}`. e.g.,
+- rush v0.1.8
+    - Supporting **Preset variable (macro)**, e.g., `rush -v p={^suffix} 'echo {p}_new_suffix'`,
+    where `{p}` is replaced with `{^suffix}`.
+    This can make the long list of commands clearer (See [example 17](https://github.com/shenwei356/rush#examples))
+- rush v0.1.7
+    - Adding short flag (-T) for flag --trim, and adding return character for trimming (now: " \t\r\n") with better support for Windows platform.
+- rush v0.1.6
+    - ignoring input only containing newline character ("\n")
+    - value of flag -D/--record-delimiter can be empty
+- rush v0.1.5
+    - fix continue (-c): immediately saving ignored commands when successful commands file is not empty (usually when running command with flag -c for 3+th times)
+- rush v0.1.4
+    - fix: remove duplicated commands in file of successful commands (-C/--succ-cmd-file)
+- rush v0.1.3
+    - fix bug of closing closed channel when using flag -e
+- rush v0.1.2
+    - fix job id for multiple input file
+    - make sure message "stop on first error(s)" be printed
+    - better windows support
+    - better solution to avoid closing closed channel (cancel)
+    - doc: add section: special cases
+- rush v0.1.1
+    - safer replacement string: return original replacement string if it is
+        - unsupported
+        - undefined variable by flag `-v`. It's a common mistake, leaving it be blank was wrong and some times dangerous. e.g.
+- rush v0.1.0
+    - fix indexing function for record delimiter, support multi-characters record delimiter (`-D`) now.
+    - support continue for multi-line commands
+    - immediately flush after a job successfully done
+    - add flag alias `-C` for `--succ-cmd-file`
+- rush v0.0.9
+    - fix replacement strings: {.} and {:} only take effect on basename
+- rush v0.0.8
+    - add replacement string {^suffix} for removing suffix. For example:
+- rush v0.0.7
+    - fix help message of flag -D
+    - add flag: `-J/--records-join-seq`, record separator for joining multi-records (default is "\n")
+- rush v0.0.6
+    - Avoid mixed line from multiple processes without loss of performance, e.g. the first half of a line is from one process and the last half of the line is from another process. similar with parallel --line-buffer
+- rush v0.0.5
+    - support safe interrupt by Ctrl + C
+    - support continue jobs
+    - fix some bugs
+    - fix tests for lots of stdout
+- rush v0.0.4
+    - implement retry interval
+    - do not send empty data
+    - update docs
+- rush v0.0.3
+    - fix timeout and other bugs
+    - update docs
+- rush v0.0.2
+    - doc improvement
+- rush v0.0.1
+    - first release
