@@ -48,12 +48,12 @@ Major:
   (`--line-buffer` in GNU parallel)
 - **Timeout** (`-t`). (`--timeout` in GNU parallel)
 - **Retry** (`-r`). (`--retry-failed --joblog` in GNU parallel)
-- **Safe exit after capturing Ctrl-C** (not perfect, you may stop it by typing ctrl-c or closing terminal)
+- **Safe exit after capturing Ctrl-C** (*not perfect*, you may stop it by typing ctrl-c or closing terminal)
 - **Continue** (`-c`). (`--resume --joblog` in GNU parallel,
-  ***but it does not support multi-line commands, which are common in workflow***)
+  ***<s/>sut it does not support multi-line commands, which are common in workflow</s>***)
 - **`awk -v` like custom defined variables** (`-v`). (***Using Shell variable in GNU parallel***)
 - **Keeping output in order of input** (`-k`). (Same `-k/--keep-order` in GNU parallel)
-- **Exit on first error(s)** (`-e`). (not perfect, you may stop it by typing ctrl-c or closing terminal) (`--halt 2` in GNU parallel) 
+- **Exit on first error(s)** (`-e`). (*not perfect*, you may stop it by typing ctrl-c or closing terminal) (`--halt 2` in GNU parallel) 
 - **Settable record delimiter** (`-D`, default `\n`). (`--recstart` and `--recend` in GNU parallel)
 - **Settable records sending to every command** (`-n`, default `1`). (`-n/--max-args` in GNU parallel)
 - **Settable field delimiter** (`-d`, default `\s+`). (Same `-d/--delimiter` in GNU parallel)
@@ -65,9 +65,9 @@ Major:
         - `{/}`, dirname. (`{//}` in GNU parallel)
         - `{%}`, basename. (`{/}` in GNU parallel)
         - `{.}`, remove the last extension. (Same in GNU parallel)
-        - `{:}`, remove any extension (***Not supported in GNU parallel***)
-        - `{^suffix}`, remove `suffix` (***Not supported in GNU parallel***)
-        - `{@regexp}`, capture submatch using regular expression (***Not supported in GNU parallel***)
+        - `{:}`, remove any extension (***Not directly supported in GNU parallel***)
+        - `{^suffix}`, remove `suffix` (***Not directly supported in GNU parallel***)
+        - `{@regexp}`, capture submatch using regular expression (***Not directly supported in GNU parallel***)
     - Combinations
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
