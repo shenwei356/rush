@@ -122,12 +122,9 @@ And then:
 
             sudo cp rush /usr/local/bin/
 
-    1. Or add the current directory of the executable file to environment variable
-    `PATH`:
+    1. Or copy to anywhere in the environment variable `PATH`:
 
-            echo export PATH=\$PATH:\"$(pwd)\" >> ~/.bashrc
-            source ~/.bashrc
-
+            mkdir -p $HOME/bin/; cp rush $HOME/bin/
 
 1. **For windows**, just copy `rush.exe` to `C:\WINDOWS\system32`.
 
