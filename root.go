@@ -115,13 +115,15 @@ Homepage: https://github.com/shenwei356/rush
 			var existed bool
 			existed, err = exists(config.SuccCmdFile)
 			checkError(err)
+			var fhSuccCmds *os.File
 			if existed {
 				succCmds = readSuccCmds(config.SuccCmdFile)
+				fhSuccCmds, err = os.OpenFile(config.SuccCmdFile, os.O_APPEND|os.O_WRONLY, 0664)
+			} else {
+				fhSuccCmds, err = os.Create(config.SuccCmdFile)
 			}
-
-			var fhSuccCmds *os.File
-			fhSuccCmds, err = os.Create(config.SuccCmdFile)
 			checkError(err)
+
 			defer fhSuccCmds.Close()
 
 			bfhSuccCmds = bufio.NewWriter(fhSuccCmds)
@@ -233,8 +235,8 @@ Homepage: https://github.com/shenwei356/rush
 							if config.Continue {
 								if _, runned = succCmds[cmdStr]; runned {
 									log.Infof("ignore cmd: %s", cmdStr)
-									bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
-									bfhSuccCmds.Flush()
+									// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
+									// bfhSuccCmds.Flush()
 								} else {
 									chCmdStr <- cmdStr
 									anyCommands = true
@@ -262,8 +264,8 @@ Homepage: https://github.com/shenwei356/rush
 						if config.Continue {
 							if _, runned = succCmds[cmdStr]; runned {
 								log.Infof("ignore cmd: %s", cmdStr)
-								bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
-								bfhSuccCmds.Flush()
+								// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
+								// bfhSuccCmds.Flush()
 							} else {
 								chCmdStr <- cmdStr
 								anyCommands = true
