@@ -1,3 +1,6 @@
+- rush v0.4.1
+    - appending finished cmds to `--succ-cmd-file` now
+    - fix variable replacement for complex commands. [25](https://github.com/shenwei356/rush/issues/25)
 - rush v0.4.0
     - new flags:
         - `--cleanup-time` allow child processes to clean up between stop / kill signals
