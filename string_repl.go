@@ -29,7 +29,7 @@ import (
 	"strings"
 )
 
-var rePlaceHolder = regexp.MustCompile(`\{([^\}]*)\}`)
+var rePlaceHolder = regexp.MustCompile(`\{([^\{\}}]*)\}`)
 var reChars = regexp.MustCompile(`\d+|.`)
 var reCharsCheck = regexp.MustCompile(`^(\d+)*.*$`)
 
