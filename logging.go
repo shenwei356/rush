@@ -32,7 +32,7 @@ import (
 var log *logging.Logger
 
 func init() {
-	logFormat := logging.MustStringFormatter(`%{color}[%{level:.4s}]%{color:reset} %{message}`)
+	logFormat := logging.MustStringFormatter(`%{time:15:04:05.000} %{color}[%{level:.4s}]%{color:reset} %{message}`)
 	var stderr io.Writer = os.Stderr
 	if runtime.GOOS == "windows" {
 		stderr = colorable.NewColorableStderr()
