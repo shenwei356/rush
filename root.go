@@ -223,14 +223,11 @@ Homepage: https://github.com/shenwei356/rush
 					records = append(records, record)
 
 					if len(records) == n {
-						if config.Escape {
-							cmdStr, err = fillCommand(config,
-								stringutil.EscapeSymbols(command0, config.EscapeSymbols),
-								Chunk{ID: id, Data: records})
-						} else {
-							cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
-						}
+						cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
 						checkError(errors.Wrap(err, "fill command"))
+						if config.Escape {
+							cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
+						}
 						if len(cmdStr) > 0 {
 							if config.Continue {
 								if _, runned = succCmds[cmdStr]; runned {
@@ -252,14 +249,11 @@ Homepage: https://github.com/shenwei356/rush
 					}
 				}
 				if len(records) > 0 {
-					if config.Escape {
-						cmdStr, err = fillCommand(config,
-							stringutil.EscapeSymbols(command0, config.EscapeSymbols),
-							Chunk{ID: id, Data: records})
-					} else {
-						cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
-					}
+					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
 					checkError(errors.Wrap(err, "fill command"))
+					if config.Escape {
+						cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
+					}
 					if len(cmdStr) > 0 {
 						if config.Continue {
 							if _, runned = succCmds[cmdStr]; runned {

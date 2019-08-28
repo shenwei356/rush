@@ -1,3 +1,5 @@
+- rush v0.4.2
+    - fix bug of escaping symbols. [#28](https://github.com/shenwei356/rush/issues/28)
 - rush v0.4.1
     - appending finished cmds to `--succ-cmd-file` now
     - fix variable replacement for complex commands. [#25](https://github.com/shenwei356/rush/issues/25)
