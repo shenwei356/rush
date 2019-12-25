@@ -186,7 +186,7 @@ Examples:
       Hello, Wei Shen!
   12. preset variable (Macro)
       # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
-      $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
+      $ echo read_1.fq.gz | rush -v p={:^_1} 'echo {p} {p}_2.fq.gz'
       read read_2.fq.gz
   13. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
