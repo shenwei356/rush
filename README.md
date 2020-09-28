@@ -536,3 +536,7 @@ propose new functions or ask for help.
 ## License
 
 [MIT License](https://github.com/shenwei356/rush/blob/master/LICENSE)
+
+## Starchart
+
+<img src="https://starchart.cc/shenwei356/rush.svg" alt="Stargazers over time" style="max-width: 100%">
