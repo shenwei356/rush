@@ -88,9 +88,9 @@ assert_equal $(cat $STDERR_FILE | grep "ERRO" | wc -l) 5
 fn_check_exit_on_first_err() {
     seq 5 | $app 'python jhz.py' -e
 }
-run check_exit_on_first_err fn_check_exit_on_first_err
-assert_no_stdout
-assert_in_stderr "first"
+# run check_exit_on_first_err fn_check_exit_on_first_err
+# assert_no_stdout
+# assert_in_stderr "first"
 
 # -------------------------------------------------
 
