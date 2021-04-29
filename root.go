@@ -418,7 +418,7 @@ func init() {
 
 	RootCmd.Flags().IntP("retries", "r", 0, "maximum retries (default 0)")
 	RootCmd.Flags().IntP("retry-interval", "", 0, "retry interval (unit: second) (default 0)")
-	RootCmd.Flags().BoolP("immediate-output", "", false, "print output immediately and interleaved, to aid debugging")
+	RootCmd.Flags().BoolP("immediate-output", "I", false, "print output immediately and interleaved, to aid debugging")
 	RootCmd.Flags().BoolP("print-retry-output", "", true, "print output from retry commands")
 	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: seconds, 0 for no timeout) (default 0)")
 
