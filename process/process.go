@@ -39,6 +39,7 @@ import (
 
 	"github.com/cznic/sortutil"
 	"github.com/pkg/errors"
+	pb "github.com/schollz/progressbar/v3"
 	"github.com/shenwei356/go-logging"
 	psutil "github.com/shirou/gopsutil/process"
 )
@@ -1138,8 +1139,12 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 
 // Options contains the options
 type Options struct {
-	DryRun              bool          // just print command
-	Jobs                int           // max jobs number
+	DryRun bool // just print command
+	Jobs   int  // max jobs number
+
+	ETA    bool // show eta
+	ETABar *pb.ProgressBar
+
 	KeepOrder           bool          // keep output order
 	Retries             int           // max retry chances
 	RetryInterval       time.Duration // retry interval
@@ -1201,6 +1206,9 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 						chOut <- msg
 					}
 					c.Cleanup()
+					if opts.ETA {
+						opts.ETABar.Add(1)
+					}
 
 					// if Verbose {
 					// 	Log.Debugf("receive %d bytes from cmd #%d\n", N, c.ID)
@@ -1231,6 +1239,9 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 						chOut <- msg
 					}
 					c.Cleanup()
+					if opts.ETA {
+						opts.ETABar.Add(1)
+					}
 
 					id++
 				} else { // wait the ID come out
@@ -1240,6 +1251,9 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 								chOut <- msg
 							}
 							c1.Cleanup()
+							if opts.ETA {
+								opts.ETABar.Add(1)
+							}
 
 							delete(cmds, c1.ID)
 							id++
@@ -1264,6 +1278,9 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 						chOut <- msg
 					}
 					c.Cleanup()
+					if opts.ETA {
+						opts.ETABar.Add(1)
+					}
 				}
 			}
 
