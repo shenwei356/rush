@@ -131,6 +131,29 @@ And then:
 #### Method 2: For Go developer
 
     go get -u github.com/shenwei356/rush/
+    
+#### Method 3: Compiling from source
+
+    # download Go from https://go.dev/dl
+    wget https://go.dev/dl/go1.17.12.linux-amd64.tar.gz
+    
+    tar -zxf go1.17.12.linux-amd64.tar.gz -C $HOME/
+    
+    # or 
+    #   echo "export PATH=$PATH:$HOME/go/bin" >> ~/.bashrc
+    #   source ~/.bashrc
+    export PATH=$PATH:$HOME/go/bin
+    
+    git clone https://github.com/shenwei356/rush
+    cd rush
+    
+    go build
+    
+    # or statically-linked binary
+    CGO_ENABLED=0 go build -tags netgo -ldflags '-w -s'
+    
+    # or cross compile for other operating systems and architectures
+    CGO_ENABLED=0 GOOS=openbsd GOARCH=amd64 go build -tags netgo -ldflags '-w -s'
 
 
 ## Usage
