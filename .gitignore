@@ -1,4 +1,5 @@
 *.directory
+.brename_detail.txt
 rush*
 binaries
 t.*

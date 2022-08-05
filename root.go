@@ -216,6 +216,7 @@ Homepage: https://github.com/shenwei356/rush
 				jobcount++
 			}
 			opts.ETABar = pb.NewOptions(jobcount,
+				pb.OptionSetWriter(os.Stderr),
 				pb.OptionShowCount(),
 				pb.OptionShowIts(),
 				pb.OptionSetItsString("jobs"),
@@ -428,7 +429,7 @@ func Execute() {
 func init() {
 	RootCmd.Flags().BoolP("verbose", "", false, "print verbose information")
 	RootCmd.Flags().BoolP("version", "V", false, `print version information and check for update`)
-	RootCmd.Flags().BoolP("eta", "", false, `eta progress bar`)
+	RootCmd.Flags().BoolP("eta", "", false, `show ETA progress bar`)
 
 	RootCmd.Flags().IntP("jobs", "j", runtime.NumCPU(), "run n jobs in parallel (default value depends on your device)")
 	RootCmd.Flags().StringP("out-file", "o", "-", `out file ("-" for stdout)`)
