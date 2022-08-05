@@ -1,3 +1,5 @@
+- rush v0.4.3
+    - add shortcut `-I` for `--immediate-output`
 - rush v0.4.2
     - fix bug of escaping symbols. [#28](https://github.com/shenwei356/rush/issues/28)
 - rush v0.4.1
