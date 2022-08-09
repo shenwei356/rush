@@ -130,7 +130,7 @@ And then:
 
 #### Method 2: For Go developer
 
-    go get -u github.com/shenwei356/rush/
+    go install github.com/shenwei356/rush@latest
     
 #### Method 3: Compiling from source
 
