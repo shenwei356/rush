@@ -388,6 +388,7 @@ Homepage: https://github.com/shenwei356/rush
 		<-doneOutput          // finish print output
 		if opts.ETA {
 			opts.ETABar.Finish()
+			os.Stderr.WriteString("\n")
 		}
 		if config.PropExitStatus {
 			<-doneExitStatus
