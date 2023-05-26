@@ -421,12 +421,16 @@ func (iw ImmediateWriter) Write(p []byte) (n int, err error) {
 
 // from https://softwareengineering.stackexchange.com/questions/177428/sets-data-structure-in-golang
 type IntSet struct {
-	set map[int]bool
+	// set map[int]bool
+	set sync.Map
 }
 
 func (set *IntSet) Add(i int) bool {
-	_, found := set.set[i]
-	set.set[i] = true
+	// _, found := set.set[i]
+	// set.set[i] = true
+	_, found := set.set.Load(i)
+	set.set.Store(i, true)
+
 	return !found //False if it existed already
 }
 
@@ -710,17 +714,45 @@ func getChildProcesses(noStopExes []string, noKillExes []string) (processRecords
 	}
 
 	if err == nil {
-		pidsVisited := IntSet{set: make(map[int]bool)}
-		for _, childCheckRecord := range childCheckRecords {
-			subProcessRecords := getProcessTreeRecursive(
-				childCheckRecord,
-				noStopExes,
-				noKillExes,
-				&pidsVisited)
-			for _, subProcessRecord := range subProcessRecords {
-				processRecords = append(processRecords, subProcessRecord)
+		// pidsVisited := IntSet{set: make(map[int]bool)}
+		pidsVisited := IntSet{set: sync.Map{}}
+
+		threads := 8 // runtime.NumCPU() 16 will panic
+		done := make(chan int)
+		ch := make(chan ProcessRecord, threads)
+		go func() {
+			for p := range ch {
+				processRecords = append(processRecords, p)
 			}
+			done <- 1
+		}()
+
+		tokens := make(chan int, threads)
+		var wg sync.WaitGroup
+
+		for _, childCheckRecord := range childCheckRecords {
+
+			wg.Add(1)
+			tokens <- 1
+			go func(childCheckRecord ChildCheckRecord) {
+				subProcessRecords := getProcessTreeRecursive(
+					childCheckRecord,
+					noStopExes,
+					noKillExes,
+					&pidsVisited)
+				for _, subProcessRecord := range subProcessRecords {
+					// processRecords = append(processRecords, subProcessRecord)
+					ch <- subProcessRecord
+				}
+
+				wg.Done()
+				<-tokens
+			}(childCheckRecord)
 		}
+
+		wg.Wait()
+		close(ch)
+		<-done
 	}
 	return processRecords
 }
@@ -762,11 +794,11 @@ func signalChildProcesses(processRecords []ProcessRecord, signalNum int) (numChi
 	if expectedNumChildrenSignaled > 0 && numChildrenSignaled == 0 {
 		switch signalNum {
 		case CTRL_C_SIGNAL:
-			Log.Error("no child processes sent Ctrl+C signal")
+			Log.Info("no child processes sent Ctrl+C signal")
 		case CTRL_BREAK_SIGNAL:
-			Log.Error("no child processes sent Ctrl+Break signal")
+			Log.Info("no child processes sent Ctrl+Break signal")
 		case KILL_SIGNAL:
-			Log.Error("no child processes killed")
+			Log.Info("no child processes killed")
 		default:
 			Log.Error(errors.New("Unexpected signalNum"))
 		}
@@ -1008,6 +1040,7 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 					}
 					os.Exit(1)
 				}
+				os.Exit(1)
 			})
 		case <-chCancelMonitor:
 			// default:  // must not use default, if you must use, use for loop
@@ -1079,6 +1112,9 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 			c.reader = bufio.NewReader(bytes.NewReader(readed))
 		}
 		if err != nil {
+			if strings.Contains(err.Error(), "interrupt") {
+				return nil
+			}
 			return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 		}
 		return nil
@@ -1131,6 +1167,9 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 		c.exitStatus = c.getExitStatus(err)
 	}
 	if err != nil {
+		if strings.Contains(err.Error(), "interrupt") {
+			return nil
+		}
 		return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 	}
 
