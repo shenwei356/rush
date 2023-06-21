@@ -1,4 +1,5 @@
 - rush v0.5.1
+    - `-c`: fix a bug -- some commands are recorded even after unsuccessfully running or interrupting with Ctrl+C. [#47](https://github.com/shenwei356/rush/issues/47)
     - `--eta`: add counts for finished commands.
 - rush v0.5.0
     - add flag `--eta` to show ETA progress bar. Thanks to @howeyc. [#39](https://github.com/shenwei356/rush/pull/39)

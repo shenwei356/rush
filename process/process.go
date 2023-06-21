@@ -81,6 +81,8 @@ type Command struct {
 
 	dryrun     bool
 	exitStatus int
+
+	Executed chan int // for checking if the command has been executed
 }
 
 // NewCommand create a Command
@@ -90,6 +92,8 @@ func NewCommand(id uint64, cmdStr string, cancel chan struct{}, timeout time.Dur
 		Cmd:     strings.TrimLeft(cmdStr, " "),
 		Cancel:  cancel,
 		Timeout: timeout,
+
+		Executed: make(chan int, 2),
 	}
 	return command
 }
@@ -964,6 +968,8 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 	defer func() {
 		close(chCancelMonitor)
 		c.Duration = time.Now().Sub(t)
+
+		close(c.Executed)
 	}()
 
 	var command *exec.Cmd
@@ -1117,6 +1123,9 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 			}
 			return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 		}
+
+		c.Executed <- 1 // the command is executed!
+
 		return nil
 	}
 
@@ -1172,6 +1181,8 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 		}
 		return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
 	}
+
+	c.Executed <- 1 // the command is executed!
 
 	return nil
 }
@@ -1483,7 +1494,10 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 				command.Ch = make(chan string, 1)
 				combine(outputsToPrint, command.Ch)
 				chCmd <- command
-				if opts.RecordSuccessfulCmd {
+				// After sending the command, it's not guaranteed that the command is executed.
+				// so, a feedback is needed.
+				v := <-command.Executed
+				if opts.RecordSuccessfulCmd && v == 1 {
 					chSuccessfulCmd <- cmdStr
 				}
 
