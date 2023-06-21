@@ -1,3 +1,5 @@
+- rush v0.5.1
+    - `--eta`: add counts for finished commands.
 - rush v0.5.0
     - add flag `--eta` to show ETA progress bar. Thanks to @howeyc. [#39](https://github.com/shenwei356/rush/pull/39)
 - rush v0.4.3
