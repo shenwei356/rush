@@ -255,6 +255,10 @@ Homepage: https://github.com/shenwei356/rush
 						if config.Continue {
 							if _, runned = succCmds[cmdStr]; runned {
 								log.Infof("ignore cmd: %s", cmdStr)
+								if opts.ETA {
+									opts.ETABar.Add(1)
+									fmt.Fprintln(os.Stderr)
+								}
 								// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 								// bfhSuccCmds.Flush()
 							} else {
