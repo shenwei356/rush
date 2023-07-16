@@ -1,5 +1,5 @@
 - rush v0.5.2
-    - fix the hung up bug of `--dry-run` which was introduced in v0.5.1.
+    - fix the hung-up bug of `--dry-run`, which was introduced in v0.5.1.
 - rush v0.5.1
     - graceful handling of Ctrl+C.
     - `-c`: fix a bug -- some commands are recorded even after unsuccessfully running or interrupting with Ctrl+C. [#47](https://github.com/shenwei356/rush/issues/47)
