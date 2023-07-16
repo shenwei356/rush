@@ -123,6 +123,7 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 		ch <- c.Cmd + "\n"
 		close(ch)
 		c.finishSendOutput = true
+		close(c.Executed)
 		return ch, nil
 	}
 
