@@ -219,6 +219,9 @@ Examples:
   14. escape special symbols
       $ seq 1 | rush 'echo -e "a\tb" | awk "{print $1}"' -q
       a
+  15. run a command with relative path in Windows, please use backslash!
+      # "brename -l -R" is used to search paths recursively
+      $ brename -l -q -R -i -p "\.go$" | rush "bin\app.exe {}"
 
   More examples: https://github.com/shenwei356/rush
 

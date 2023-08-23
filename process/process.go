@@ -89,7 +89,7 @@ type Command struct {
 func NewCommand(id uint64, cmdStr string, cancel chan struct{}, timeout time.Duration) *Command {
 	command := &Command{
 		ID:      id,
-		Cmd:     strings.TrimLeft(cmdStr, " "),
+		Cmd:     strings.TrimLeft(cmdStr, " \t\r\n"),
 		Cancel:  cancel,
 		Timeout: timeout,
 
