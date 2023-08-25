@@ -167,6 +167,28 @@ Author: Wei Shen <shenwei356@gmail.com>
 
 Homepage: https://github.com/shenwei356/rush
 
+Replacement strings:
+
+    {}          full data
+    {#}         job ID
+    {n}         nth field in delimiter-delimited data
+    {/}         dirname
+    {%}         basename
+    {.}         remove the last extension
+    {:}         remove any extension
+    {^suffix}   remove suffix
+    {@regexp}   capture submatch using regular expression
+
+    Combinations:
+        {%.}, {%:}          basename without extension
+        {2.}, {2/}, {2%.}   manipulate nth field
+
+Preset variable (macro):
+
+    An example, where {p} is replaced with {^suffix}.
+
+        rush -v p={^suffix} 'echo {p}_new_suffix'
+
 Usage:
   rush [flags] [command] [args of command...]
 
@@ -182,7 +204,7 @@ Examples:
   5. dirname & basename & remove suffix
       $ echo dir/file_1.txt.gz | rush 'echo {/} {%} {^_1.txt.gz}'
       dir file.txt.gz dir/file
-  6. basename without last or any extension
+  6. basename without the last or any extension
       $ echo dir.d/file.txt.gz | rush 'echo {.} {:} {%.} {%:}'
       dir.d/file.txt dir.d/file file.txt file
   7. job ID, combine fields and other replacement strings
@@ -208,9 +230,9 @@ Examples:
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
   12. preset variable (Macro)
-      # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
-      $ echo read_1.fq.gz | rush -v p={:^_1} 'echo {p} {p}_2.fq.gz'
-      read read_2.fq.gz
+      # equal to: echo sample_1.fq.gz | rush 'echo {:^_1} {} {:^_1}_2.fq.gz'
+      $ echo sample_1.fq.gz | rush -v p={:^_1} 'echo {p} {} {p}_2.fq.gz'
+      sample sample_1.fq.gz sample_2.fq.gz
   13. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
       [INFO] ignore cmd #1: sleep 1; echo 1
@@ -219,28 +241,36 @@ Examples:
   14. escape special symbols
       $ seq 1 | rush 'echo -e "a\tb" | awk "{print $1}"' -q
       a
-  15. run a command with relative path in Windows, please use backslash!
+  15. run a command with relative paths in Windows, please use backslash as the separator.
       # "brename -l -R" is used to search paths recursively
       $ brename -l -q -R -i -p "\.go$" | rush "bin\app.exe {}"
 
   More examples: https://github.com/shenwei356/rush
 
 Flags:
-  -v, --assign strings            assign the value val to the variable var (format: var=val, val also supports replacement strings)
-      --cleanup-time int          time to allow child processes to clean up between stop / kill signals (unit: seconds, 0 for no time) (default 3) (default 3)
-  -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves data so we can continue jobs next time; 3) if the file exists, rush ignores jobs in it and update the file
+  -v, --assign strings            assign the value val to the variable var (format: var=val, val also
+                                  supports replacement strings)
+      --cleanup-time int          time to allow child processes to clean up between stop / kill signals
+                                  (unit: seconds, 0 for no time) (default 3) (default 3)
+  -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given
+                                  by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves
+                                  data so we can continue jobs next time; 3) if the file exists, rush
+                                  ignores jobs in it and update the file
       --dry-run                   print command but not run
-  -q, --escape                    escape special symbols like $ which you can customize by flag -Q/--escape-symbols
+  -q, --escape                    escape special symbols like $ which you can customize by flag
+                                  -Q/--escape-symbols
   -Q, --escape-symbols string     symbols to escape (default "$#&`")
       --eta                       show ETA progress bar
   -d, --field-delimiter string    field delimiter in records, support regular expression (default "\\s+")
   -h, --help                      help for rush
-  -I  --immediate-output          print output immediately and interleaved, to aid debugging
+  -I, --immediate-output          print output immediately and interleaved, to aid debugging
   -i, --infile strings            input data file, multi-values supported
   -j, --jobs int                  run n jobs in parallel (default value depends on your device) (default 16)
   -k, --keep-order                keep output in order of input
-      --no-kill-exes strings      exe names to exclude from kill signal, example: mspdbsrv.exe; or use all for all exes (default none)
-      --no-stop-exes strings      exe names to exclude from stop signal, example: mspdbsrv.exe; or use all for all exes (default none)
+      --no-kill-exes strings      exe names to exclude from kill signal, example: mspdbsrv.exe; or use
+                                  all for all exes (default none)
+      --no-stop-exes strings      exe names to exclude from stop signal, example: mspdbsrv.exe; or use
+                                  all for all exes (default none)
   -n, --nrecords int              number of records sent to a command (default 1)
   -o, --out-file string           out file ("-" for stdout) (default "-")
       --print-retry-output        print output from retry commands (default true)
@@ -249,12 +279,15 @@ Flags:
   -J, --records-join-sep string   record separator for joining multi-records (default is "\n") (default "\n")
   -r, --retries int               maximum retries (default 0)
       --retry-interval int        retry interval (unit: second) (default 0)
-  -e, --stop-on-error             stop child processes on first error (not perfect, you may stop it by typing ctrl-c or closing terminal)
+  -e, --stop-on-error             stop child processes on first error (not perfect, you may stop it by
+                                  typing ctrl-c or closing terminal)
   -C, --succ-cmd-file string      file for saving successful commands (default "successful_cmds.rush")
   -t, --timeout int               timeout of a command (unit: seconds, 0 for no timeout) (default 0)
-  -T, --trim string               trim white space (" \t\r\n") in input (available values: "l" for left, "r" for right, "lr", "rl", "b" for both side)
+  -T, --trim string               trim white space (" \t\r\n") in input (available values: "l" for left,
+                                  "r" for right, "lr", "rl", "b" for both side)
       --verbose                   print verbose information
   -V, --version                   print version information and check for update
+
 ```
 
 

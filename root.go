@@ -51,6 +51,28 @@ Author: Wei Shen <shenwei356@gmail.com>
 
 Homepage: https://github.com/shenwei356/rush
 
+Replacement strings:
+
+    {}          full data
+    {#}         job ID
+    {n}         nth field in delimiter-delimited data
+    {/}         dirname
+    {%%}         basename
+    {.}         remove the last extension
+    {:}         remove any extension
+    {^suffix}   remove suffix
+    {@regexp}   capture submatch using regular expression
+
+    Combinations:
+        {%%.}, {%%:}          basename without extension
+        {2.}, {2/}, {2%%.}   manipulate nth field
+
+Preset variable (macro):
+
+    An example, where {p} is replaced with {^suffix}.
+
+        rush -v p={^suffix} 'echo {p}_new_suffix'
+
 `, VERSION),
 	Run: func(cmd *cobra.Command, args []string) {
 		process.Log = log
@@ -486,7 +508,7 @@ func init() {
   5. dirname & basename & remove suffix
       $ echo dir/file_1.txt.gz | rush 'echo {/} {%} {^_1.txt.gz}'
       dir file.txt.gz dir/file
-  6. basename without last or any extension
+  6. basename without the last or any extension
       $ echo dir.d/file.txt.gz | rush 'echo {.} {:} {%.} {%:}'
       dir.d/file.txt dir.d/file file.txt file
   7. job ID, combine fields and other replacement strings
@@ -512,9 +534,9 @@ func init() {
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
   12. preset variable (Macro)
-      # equal to: echo read_1.fq.gz | rush 'echo {:^_1} {:^_1}_2.fq.gz'
-      $ echo read_1.fq.gz | rush -g -v p={:^_1} 'echo {p} {p}_2.fq.gz'
-      read read_2.fq.gz
+      # equal to: echo sample_1.fq.gz | rush 'echo {:^_1} {} {:^_1}_2.fq.gz'
+      $ echo sample_1.fq.gz | rush -v p={:^_1} 'echo {p} {} {p}_2.fq.gz'
+      sample sample_1.fq.gz sample_2.fq.gz
   13. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
       [INFO] ignore cmd #1: sleep 1; echo 1
@@ -523,7 +545,7 @@ func init() {
   14. escape special symbols
       $ seq 1 | rush 'echo -e "a\tb" | awk "{print $1}"' -q
       a
-  15. run a command with relative path in Windows, please use backslash!
+  15. run a command with relative paths in Windows, please use backslash as the separator.
       # "brename -l -R" is used to search paths recursively
       $ brename -l -q -R -i -p "\.go$" | rush "bin\app.exe {}"
 
@@ -544,10 +566,10 @@ Available Commands:{{range .Commands}}{{if .IsAvailableCommand}}
   {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{ if .HasAvailableLocalFlags}}
 
 Flags:
-{{.LocalFlags.FlagUsages | trimRightSpace}}{{end}}{{ if .HasAvailableInheritedFlags}}
+{{.LocalFlags.FlagUsagesWrapped 110 | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
 
 Global Flags:
-{{.InheritedFlags.FlagUsages | trimRightSpace}}{{end}}{{if .HasHelpSubCommands}}
+{{.InheritedFlags.FlagUsagesWrapped 110 | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
 
 Additional help topics:{{range .Commands}}{{if .IsHelpCommand}}
   {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{ if .HasAvailableSubCommands }}
@@ -671,3 +693,4 @@ func getConfigs(cmd *cobra.Command) Config {
 		EscapeSymbols: getFlagString(cmd, "escape-symbols"),
 	}
 }
+
