@@ -1480,6 +1480,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 							}
 							chances--
 							<-time.After(opts.RetryInterval)
+
+							command.Executed = make(chan int, 2) // recreate it to avoid panic: close of closed channel
+
 							continue
 						}
 						return
