@@ -1,4 +1,4 @@
-// Copyright © 2017 Wei Shen <shenwei356@gmail.com>
+// Copyright © 2017-2023 Wei Shen <shenwei356@gmail.com>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,15 +54,20 @@ Homepage: https://github.com/shenwei356/rush
 Input:
   - Input could be a list of strings or numbers, e.g., file paths.
   - Input can be given either from the STDIN or file(s) via the option -i/--infile.
-  - For options could be used to defined how the input records are parsed:
-    -d, --field-delimiter   field delimiter in records          (default "\s+")
-    -D, --record-delimiter  record delimiter                    (default "\n")
+  - Some options could be used to defined how the input records are parsed:
+    -d, --field-delimiter   field delimiter in records (default "\s+")
+    -D, --record-delimiter  record delimiter (default "\n")
     -n, --nrecords          number of records sent to a command (default 1)
+    -J, --records-join-sep  record separator for joining multi-records (default "\n")
     -T, --trim              trim white space (" \t\r\n") in input
 
 Output:
   - Outputs of all commands are written to STDOUT by default,
     you can also use -o/--out-file to specify a output file.
+  - Outputs of all commands are random, you can use the flag -k/--kep-order
+    to keep output in order of input.
+  - Outputs of all commands are buffered, you can use the flag -I/--immediate-output
+    to print output immediately and interleaved.
 
 Replacement strings in commands:
   {}          full data

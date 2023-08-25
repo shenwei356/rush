@@ -96,19 +96,20 @@ Note that speed is not the #.1 target, especially for processes that last long.
 
 #### Method 1: Download binaries
 
-[rush v0.5.2](https://github.com/shenwei356/rush/releases/tag/v0.5.2)
-[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.5.2/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.5.2)
+[rush v0.5.3](https://github.com/shenwei356/rush/releases/tag/v0.5.3)
+[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.5.3/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.5.3)
 
 ***Tip: run `rush -V` to check update !!!***
 
 OS     |Arch      |File, (中国镜像)                                                                                                                                                                         |Download Count
 :------|:---------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_linux_386.tar.gz)
-Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_linux_amd64.tar.gz)
-OS X   |32-bit    |[rush_darwin_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_darwin_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_386.tar.gz))                         |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_darwin_386.tar.gz)
-OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_darwin_amd64.tar.gz)
-Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_windows_386.exe.tar.gz)
-Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.2/rush_windows_amd64.exe.tar.gz)
+Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_linux_386.tar.gz)
+Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_linux_amd64.tar.gz)
+Linux  |**arm64** |[**rush_linux_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_linux_arm64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_arm64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_linux_arm64.tar.gz)
+OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_darwin_amd64.tar.gz)
+OS X   |**arm64** |[**rush_darwin_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_darwin_arm64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_arm64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_darwin_arm64.tar.gz)
+Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_windows_386.exe.tar.gz)
+Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.5.3/rush_windows_amd64.exe.tar.gz)
 
 
 Just [download](https://github.com/shenwei356/rush/releases) compressed
@@ -134,9 +135,9 @@ And then:
 #### Method 3: Compiling from source
 
     # download Go from https://go.dev/dl
-    wget https://go.dev/dl/go1.17.12.linux-amd64.tar.gz
+    wget https://go.dev/dl/go1.17.13.linux-amd64.tar.gz
     
-    tar -zxf go1.17.12.linux-amd64.tar.gz -C $HOME/
+    tar -zxf go1.17.13.linux-amd64.tar.gz -C $HOME/
     
     # or 
     #   echo "export PATH=$PATH:$HOME/go/bin" >> ~/.bashrc
@@ -169,15 +170,20 @@ Homepage: https://github.com/shenwei356/rush
 Input:
   - Input could be a list of strings or numbers, e.g., file paths.
   - Input can be given either from the STDIN or file(s) via the option -i/--infile.
-  - For options could be used to defined how the input records are parsed:
-    -d, --field-delimiter   field delimiter in records          (default "\s+")
-    -D, --record-delimiter  record delimiter                    (default "\n")
+  - Some options could be used to defined how the input records are parsed:
+    -d, --field-delimiter   field delimiter in records (default "\s+")
+    -D, --record-delimiter  record delimiter (default "\n")
     -n, --nrecords          number of records sent to a command (default 1)
+    -J, --records-join-sep  record separator for joining multi-records (default "\n")
     -T, --trim              trim white space (" \t\r\n") in input
 
 Output:
   - Outputs of all commands are written to STDOUT by default,
     you can also use -o/--out-file to specify a output file.
+  - Outputs of all commands are random, you can use the flag -k/--kep-order
+    to keep output in order of input.
+  - Outputs of all commands are buffered, you can use the flag -I/--immediate-output
+    to print output immediately and interleaved.
 
 Replacement strings in commands:
   {}          full data
