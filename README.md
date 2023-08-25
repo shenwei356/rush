@@ -1,6 +1,5 @@
 # rush -- a cross-platform command-line tool for executing jobs in parallel
 
-[![Build Status](https://travis-ci.org/shenwei356/rush.svg?branch=master)](https://travis-ci.org/shenwei356/rush)
 [![Built with GoLang](https://img.shields.io/badge/powered_by-go-6362c2.svg?style=flat)](https://golang.org)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shenwei356/rush)](https://goreportcard.com/report/github.com/shenwei356/rush)
 [![Cross-platform](https://img.shields.io/badge/platform-any-ec2eb4.svg?style=flat)](#download)
@@ -64,8 +63,8 @@ Major:
     - Directory and file
         - `{/}`, dirname. (`{//}` in GNU parallel)
         - `{%}`, basename. (`{/}` in GNU parallel)
-        - `{.}`, remove the last extension. (Same in GNU parallel)
-        - `{:}`, remove any extension (***Not directly supported in GNU parallel***)
+        - `{.}`, remove the last file extension. (Same in GNU parallel)
+        - `{:}`, remove all file extensions (***Not directly supported in GNU parallel***)
         - `{^suffix}`, remove `suffix` (***Not directly supported in GNU parallel***)
         - `{@regexp}`, capture submatch using regular expression (***Not directly supported in GNU parallel***)
     - Combinations
@@ -158,39 +157,56 @@ And then:
 
 ## Usage
 
-```
+```text
 rush -- a cross-platform command-line tool for executing jobs in parallel
 
-Version: 0.5.2
+Version: 0.5.3
 
 Author: Wei Shen <shenwei356@gmail.com>
 
 Homepage: https://github.com/shenwei356/rush
 
-Replacement strings:
+Input:
+  - Input could be a list of strings or numbers, e.g., file paths.
+  - Input can be given either from the STDIN or file(s) via the option -i/--infile.
+  - For options could be used to defined how the input records are parsed:
+    -d, --field-delimiter   field delimiter in records          (default "\s+")
+    -D, --record-delimiter  record delimiter                    (default "\n")
+    -n, --nrecords          number of records sent to a command (default 1)
+    -T, --trim              trim white space (" \t\r\n") in input
 
-    {}          full data
-    {#}         job ID
-    {n}         nth field in delimiter-delimited data
-    {/}         dirname
-    {%}         basename
-    {.}         remove the last extension
-    {:}         remove any extension
-    {^suffix}   remove suffix
-    {@regexp}   capture submatch using regular expression
+Output:
+  - Outputs of all commands are written to STDOUT by default,
+    you can also use -o/--out-file to specify a output file.
 
-    Combinations:
-        {%.}, {%:}          basename without extension
-        {2.}, {2/}, {2%.}   manipulate nth field
+Replacement strings in commands:
+  {}          full data
+  {#}         job ID
+  {n}         nth field in delimiter-delimited data
+  {/}         dirname
+  {%}         basename
+  {.}         remove the last file extension
+  {:}         remove all file extensions.
+  {^suffix}   remove suffix
+  {@regexp}   capture submatch using regular expression
+
+  Combinations:
+    {%.}, {%:}          basename without extension
+    {2.}, {2/}, {2%.}   manipulate nth field
 
 Preset variable (macro):
-
-    An example, where {p} is replaced with {^suffix}.
-
-        rush -v p={^suffix} 'echo {p}_new_suffix'
+  1. You can pass variables to the command like awk via the option -v. E.g.,
+     $ seq 3 | rush -v p=prefix_ -v s=_suffix 'echo {p}{}{s}'
+     prefix_3_suffix
+     prefix_1_suffix
+     prefix_2_suffix
+  2. The value could also contain replacement strings.
+     # {p} will be replaced with {%:}, which computes the basename and remove all file extensions.
+     $ echo a/b/c.txt.gz | rush -v 'p={%:}' 'echo {p} {p}.csv'
+     c c.csv
 
 Usage:
-  rush [flags] [command] [args of command...]
+  rush [flags] [command]
 
 Examples:
   1. simple run, quoting is not necessary
@@ -576,8 +592,14 @@ Flags:
 
 ## Contributors
 
+Main contributors:
+
 - [Wei Shen](https://github.com/shenwei356)
-- [Brian Burgin](https://github.com/bburgin)
+- @bburgin [Brian Burgin](https://github.com/bburgin) for cross-platform process management.
+- @howeyc [Chris Howey](https://github.com/howeyc) for ETA progress bar.
+
+[Others contributors](https://github.com/shenwei356/rush/graphs/contributors)
+
 
 ## Acknowledgements
 
