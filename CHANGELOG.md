@@ -1,5 +1,6 @@
 - rush v0.5.3
     - fix the panic of `close of closed channel` when using `-r/--retries`, which was introduced in v0.5.1.
+    - updated help doc.
 - rush v0.5.2
     - fix the hung-up bug of `--dry-run`, which was introduced in v0.5.1.
 - rush v0.5.1
