@@ -13,16 +13,16 @@ require (
 	github.com/shenwei356/util v0.5.1
 	github.com/shenwei356/xopen v0.3.1
 	github.com/shirou/gopsutil v3.21.11+incompatible
-	github.com/spf13/cobra v1.5.0
+	github.com/spf13/cobra v1.7.0
 )
 
 require (
 	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548 // indirect
 	github.com/dsnet/compress v0.0.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.15.12 // indirect
-	github.com/klauspost/pgzip v1.2.5 // indirect
+	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
