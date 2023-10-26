@@ -26,7 +26,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"regexp"
@@ -375,8 +374,8 @@ func (lw *ImmediateLineWriter) WritePrefixedLines(input string, outfh *os.File) 
 					lastStart = matchExtent[1]
 				}
 				// append any remaining chars after the last delimiter
-				lastPart := string(rs[lastStart:len(rs)])
-				if len(lastPart) > 0 {
+				if lastStart < len(rs) {
+					lastPart := string(rs[lastStart:])
 					// there is some data in this part, so add prefix if needed
 					lw.addPrefixIfNeeded(&output)
 					lw.line = lw.line + lastPart
@@ -1138,7 +1137,7 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 		return errors.Wrapf(err, "run cmd #%d: %s", c.ID, c.Cmd)
 	}
 
-	c.tmpfh, err = ioutil.TempFile("", tmpfilePrefix)
+	c.tmpfh, err = os.CreateTemp("", tmpfilePrefix)
 	if err != nil {
 		return errors.Wrapf(err, "create tmpfile for cmd #%d: %s", c.ID, c.Cmd)
 	}

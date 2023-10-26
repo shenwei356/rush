@@ -1,3 +1,5 @@
+- rush v0.5.4
+    - fix a crash when using `-I`. [#52](https://github.com/shenwei356/rush/issues/52)
 - rush v0.5.3
     - fix the panic of `close of closed channel` when using `-r/--retries`, which was introduced in v0.5.1.
     - updated help doc.
