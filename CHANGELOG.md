@@ -1,3 +1,5 @@
+- rush v0.5.5
+    - security update. [#58](https://github.com/shenwei356/rush/issues/58)
 - rush v0.5.4
     - fix a crash when using `-I`. [#52](https://github.com/shenwei356/rush/issues/52)
 - rush v0.5.3
