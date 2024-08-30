@@ -352,18 +352,16 @@ func (lw *ImmediateLineWriter) WritePrefixedLines(input string, outfh *os.File) 
 			reg := regexp.MustCompile("(?:\r\n|\n)")
 			matchExtents := reg.FindAllStringIndex(input, -1)
 			if len(matchExtents) > 0 {
-				// use runes below, so we work correctly with unicode strings
-				rs := []rune(input)
 				lastStart := 0
 				for _, matchExtent := range matchExtents {
-					beforePart := string(rs[lastStart:matchExtent[0]])
+					beforePart := input[lastStart:matchExtent[0]]
 					lw.line = lw.line + beforePart
 					// skip empty lines
 					if len(lw.line) > 0 {
 						// there is some data in this part, so add prefix if needed
 						lw.addPrefixIfNeeded(&output)
 						// append the chars up to and including the delimiter
-						delimiterPart := string(rs[matchExtent[0]:matchExtent[1]])
+						delimiterPart := input[matchExtent[0]:matchExtent[1]]
 						output = output + beforePart + delimiterPart
 						// defer including prefix, so only add it on next non-empty data
 						lw.includePrefix = true
@@ -374,8 +372,8 @@ func (lw *ImmediateLineWriter) WritePrefixedLines(input string, outfh *os.File) 
 					lastStart = matchExtent[1]
 				}
 				// append any remaining chars after the last delimiter
-				if lastStart < len(rs) {
-					lastPart := string(rs[lastStart:])
+				if lastStart < len(input) {
+					lastPart := input[lastStart:]
 					// there is some data in this part, so add prefix if needed
 					lw.addPrefixIfNeeded(&output)
 					lw.line = lw.line + lastPart
