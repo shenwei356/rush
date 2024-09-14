@@ -30,7 +30,7 @@ import (
 )
 
 // VERSION of this package
-const VERSION = "0.5.6"
+const VERSION = "0.5.7"
 
 func isStdin(file string) bool {
 	return file == "-"

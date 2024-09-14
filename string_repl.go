@@ -70,7 +70,11 @@ func fillCommand(config Config, command string, chunk Chunk) (string, error) {
 		target = fieldsStr
 
 		if chars == "" {
-			target = fieldsStr
+			if config.GreedyCount == 0 {
+				target = "{}"
+			} else {
+				target = fieldsStr
+			}
 		} else if chars == "#" {
 			target = fmt.Sprintf("%d", chunk.ID)
 		} else if !reCharsCheck.MatchString(chars) {
