@@ -1,3 +1,6 @@
+- rush v0.6.0
+    - fix variables containing "{}", the bug was introduced in v0.5.7, e.g., `rush -v 'p={}/{%}' 'echo {p}_1.fq'` outputs `a/b/b_1.fq`.
+    - supports outputting "{}" with the replacement string "{{}}". `echo a/b | rush 'echo {{}}'` outputs `{}`.
 - rush v0.5.7
     - fix a bug for the input with "{}". [#61](https://github.com/shenwei356/rush/issues/61)
 - rush v0.5.6

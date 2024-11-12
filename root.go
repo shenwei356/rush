@@ -74,11 +74,12 @@ Replacement strings in commands:
   {#}         job ID
   {n}         nth field in delimiter-delimited data
   {/}         dirname
-  {%%}         basename
+  {%%}        basename
   {.}         remove the last file extension
   {:}         remove all file extensions.
   {^suffix}   remove suffix
   {@regexp}   capture submatch using regular expression
+  {{}}        "{}" itself
 
   Combinations:
     {%%.}, {%%:}          basename without extension
