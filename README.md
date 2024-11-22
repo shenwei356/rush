@@ -95,6 +95,16 @@ Note that speed is not the #.1 target, especially for processes that last long.
  executable binary files **for most popular operating systems** are freely available
   in [release](https://github.com/shenwei356/rush/releases) page.
 
+#### Method 0: Conda
+
+[Install conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html), then run
+
+    conda install -c conda-forge rush
+
+Or use [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html), which is faster.
+
+    mamba install -c conda-forge rush
+
 #### Method 1: Download binaries
 
 [rush v0.6.0](https://github.com/shenwei356/rush/releases/tag/v0.6.0)
