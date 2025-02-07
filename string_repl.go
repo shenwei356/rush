@@ -109,10 +109,11 @@ func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 						}
 
 						if i > len(fields) {
-							i = len(fields)
+							target = fmt.Sprintf("{%s}", chars)
+						} else {
+							target = fields[i-1]
 						}
 
-						target = fields[i-1]
 					}
 					i = 1
 				} else { // handle whole fieldStr
