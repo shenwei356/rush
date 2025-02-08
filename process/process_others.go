@@ -35,6 +35,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	psutil "github.com/shirou/gopsutil/process"
 )
 
 func getProcess(pid int) (processHandle int, processExists bool, accessGranted bool, err error) {
@@ -194,7 +196,7 @@ func getSignalsToSend(childProcessName string, noStopExes []string, noKillExes [
 	return signalsToSend, err
 }
 
-func doesChildHaveMarker(pid int, processHandle int) (hasMarker bool, err error) {
+func doesChildHaveMarker(_ *psutil.Process, processHandle int) (hasMarker bool, err error) {
 	// the process handle is the pid
 	envCmd := fmt.Sprintf("xargs -0 -n 1 < %s/%d/environ", Procd, processHandle)
 	env, err := exec.Command(getShell(), "-c", envCmd).Output()

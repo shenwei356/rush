@@ -352,15 +352,12 @@ func getSignalsToSend(childProcessName string, noStopExes []string, noKillExes [
 	return signalsToSend, err
 }
 
-func doesChildHaveMarker(pid int, processHandle int) (hasMarker bool, err error) {
+func doesChildHaveMarker(process *psutil.Process, _ int) (hasMarker bool, err error) {
 	err = nil
 	hasMarker = false
-	process, err := psutil.NewProcess(int32(pid))
-	if err == nil {
-		env, err := process.Environ()
-		if env != nil && err == nil {
-			hasMarker = containsMarker(strings.Join(env[:], ";"))
-		}
+	env, err := process.Environ()
+	if env != nil && err == nil {
+		hasMarker = containsMarker(strings.Join(env[:], ";"))
 	}
 	return hasMarker, err
 }

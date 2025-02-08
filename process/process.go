@@ -512,7 +512,7 @@ func checkChildProcess(pidRecordsLock *sync.Mutex, childCheckProcess *psutil.Pro
 		if processHandle != INVALID_HANDLE {
 			// Don't look at parent-child relationships, since children, grandchildren, etc.
 			// could become orphaned at any time. Just look for the child marker to know.
-			considerChild, err = doesChildHaveMarker(int(childCheckProcess.Pid), processHandle)
+			considerChild, err = doesChildHaveMarker(childCheckProcess, processHandle)
 			if err == nil {
 				if considerChild {
 					var childProcessName string = ""
