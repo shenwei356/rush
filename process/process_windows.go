@@ -29,30 +29,26 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
-	"unicode/utf16"
 	"unsafe"
 
 	"github.com/elastic/go-windows"
 	"github.com/palantir/stacktrace"
 	"github.com/pkg/errors"
+	psutil "github.com/shirou/gopsutil/process"
 )
 
 var is32bitRush bool = runtime.GOARCH == "386"
 
 var (
-	modntdll                = syscall.NewLazyDLL("ntdll.dll")
-	procNtReadVirtualMemory = modntdll.NewProc("NtReadVirtualMemory")
-
 	modkernel32                  = syscall.NewLazyDLL("kernel32.dll")
 	procCreateRemoteThread       = modkernel32.NewProc("CreateRemoteThread")
 	procGetSystemWow64DirectoryW = modkernel32.NewProc("GetSystemWow64DirectoryW")
 	procIsWow64Process           = modkernel32.NewProc("IsWow64Process")
 	procOpenProcess              = modkernel32.NewProc("OpenProcess")
-	procGetProcessTimes          = modkernel32.NewProc("GetProcessTimes")
 	procVirtualAllocEx           = modkernel32.NewProc("VirtualAllocEx")
 	procVirtualFreeEx            = modkernel32.NewProc("VirtualFreeEx")
-	procVirtualQueryEx           = modkernel32.NewProc("VirtualQueryEx")
 	procWaitForSingleObject      = modkernel32.NewProc("WaitForSingleObject")
 	procWriteProcessMemory       = modkernel32.NewProc("WriteProcessMemory")
 
@@ -100,11 +96,6 @@ const (
 	ERROR_INVALID_PARAMETER = 87
 )
 
-func getNtErr(status uint32) error {
-	ntStatus := windows.NTStatus(status)
-	return stacktrace.PropagateWithCode(ntStatus, stacktrace.ErrorCode(ntStatus), "")
-}
-
 func getSyscallErr(e1 syscall.Errno) error {
 	var simpleErr error = nil
 	var errorCode int = 0
@@ -142,22 +133,13 @@ func openProcess(da uint32, inheritHandle bool, pid uint32) (handle syscall.Hand
 	return
 }
 
-func getProcessTimes(handle syscall.Handle, creationTime *syscall.Filetime, exitTime *syscall.Filetime, kernelTime *syscall.Filetime, userTime *syscall.Filetime) (err error) {
-	r1, _, e1 := syscall.Syscall6(procGetProcessTimes.Addr(), 5, uintptr(handle), uintptr(unsafe.Pointer(creationTime)), uintptr(unsafe.Pointer(exitTime)), uintptr(unsafe.Pointer(kernelTime)), uintptr(unsafe.Pointer(userTime)), 0)
-	if r1 == 0 {
-		err = getSyscallErr(e1)
-	}
-	return
-}
-
 func getProcess(pid int) (processHandle int, processExists bool, accessGranted bool, err error) {
 	processExists = false
 	accessGranted = false
-	var access uint32
 	// All these are needed for CreateRemoteThread()
 	// PROCESS_QUERY_INFORMATION is needed to call GetExitCodeProcess()
 	// PROCESS_VM_READ is needed to read process memory
-	access = PROCESS_CREATE_THREAD | syscall.PROCESS_QUERY_INFORMATION |
+	var access uint32 = PROCESS_CREATE_THREAD | syscall.PROCESS_QUERY_INFORMATION |
 		PROCESS_VM_OPERATION | PROCESS_VM_WRITE | windows.PROCESS_VM_READ
 
 	winProcessHandle, err := openProcess(
@@ -203,23 +185,6 @@ func doesProcessExist(processHandle int) (processExists bool) {
 	return processExists
 }
 
-func _getProcessStartTime(processHandle int) (startTime uint64, err error) {
-	var times syscall.Rusage
-	err = getProcessTimes(
-		syscall.Handle(processHandle),
-		&times.CreationTime,
-		&times.ExitTime,
-		&times.KernelTime,
-		&times.UserTime,
-	)
-	// from https://github.com/cloudfoundry/gosigar/blob/master/sigar_windows.go
-	// Windows epoch times are expressed as time elapsed since midnight on
-	// January 1, 1601 at Greenwich, England. This converts the Filetime to
-	// unix epoch in milliseconds.
-	startTime = uint64(times.CreationTime.Nanoseconds() / 1e6)
-	return
-}
-
 func waitForSingleObject(handle syscall.Handle, waitMilliseconds uint32) (event uint32, err error) {
 	r0, _, e1 := syscall.Syscall(procWaitForSingleObject.Addr(), 2, uintptr(handle), uintptr(waitMilliseconds), 0)
 	event = uint32(r0)
@@ -227,87 +192,6 @@ func waitForSingleObject(handle syscall.Handle, waitMilliseconds uint32) (event 
 		err = getSyscallErr(e1)
 	}
 	return
-}
-
-func _ntReadVirtualMemory(handle syscall.Handle, baseAddress uintptr, buffer uintptr, size uintptr, numRead *uintptr) (ntStatus uint32) {
-	r0, _, _ := procNtReadVirtualMemory.Call(
-		uintptr(handle), uintptr(baseAddress), uintptr(buffer), uintptr(size), uintptr(unsafe.Pointer(numRead)))
-	ntStatus = uint32(r0)
-	return
-}
-
-func ntReadVirtualMemory(handle syscall.Handle, baseAddress uintptr, dest []byte) (numRead uintptr, err error) {
-	n := len(dest)
-	if n == 0 {
-		return 0, nil
-	}
-	status := _ntReadVirtualMemory(handle, baseAddress, uintptr(unsafe.Pointer(&dest[0])), uintptr(n), &numRead)
-	if status != 0 {
-		return numRead, getNtErr(status)
-	}
-	return numRead, nil
-}
-
-func getProcessBasicInformation(processHandle syscall.Handle) (pbi windows.ProcessBasicInformationStruct, err error) {
-	actualSize, err := windows.NtQueryInformationProcess(processHandle, windows.ProcessBasicInformation, unsafe.Pointer(&pbi), uint32(windows.SizeOfProcessBasicInformationStruct))
-	if actualSize < uint32(windows.SizeOfProcessBasicInformationStruct) {
-		return pbi, errors.New("Bad size for PROCESS_BASIC_INFORMATION")
-	}
-	return pbi, err
-}
-
-func getUserProcessParams(processHandle syscall.Handle, pbi windows.ProcessBasicInformationStruct) (params RtlUserProcessParameters, err error) {
-	const is32bitProc = unsafe.Sizeof(uintptr(0)) == 4
-
-	// Offset of params field within PEB structure.
-	// This structure is different in 32 and 64 bit.
-	paramsOffset := 0x20
-	if is32bitProc {
-		paramsOffset = 0x10
-	}
-
-	// Read the PEB from the target process memory
-	pebSize := paramsOffset + 8
-	peb := make([]byte, pebSize)
-	nRead, err := ntReadVirtualMemory(processHandle, pbi.PebBaseAddress, peb)
-	if err != nil {
-		return params, err
-	}
-	if nRead != uintptr(pebSize) {
-		return params, errors.Errorf("PEB: short read (%d/%d)", nRead, pebSize)
-	}
-
-	// Get the RTL_USER_PROCESS_PARAMETERS struct pointer from the PEB
-	paramsAddr := *(*uintptr)(unsafe.Pointer(&peb[paramsOffset]))
-
-	// Read the RTL_USER_PROCESS_PARAMETERS from the target process memory
-	paramsBuf := make([]byte, SizeOfRtlUserProcessParameters)
-	nRead, err = ntReadVirtualMemory(processHandle, paramsAddr, paramsBuf)
-	if err != nil {
-		return params, err
-	}
-	if nRead != uintptr(SizeOfRtlUserProcessParameters) {
-		return params, errors.Errorf("RTL_USER_PROCESS_PARAMETERS: short read (%d/%d)", nRead, SizeOfRtlUserProcessParameters)
-	}
-
-	params = *(*RtlUserProcessParameters)(unsafe.Pointer(&paramsBuf[0]))
-	return params, nil
-}
-
-// from https://github.com/elastic/go-windows/utf16.go, but without null terminal truncation
-// UTF16BytesToString returns a string that is decoded from the UTF-16 bytes.
-// The byte slice must be of even length otherwise an error will be returned.
-func utf16BytesToString(b []byte) (string, error) {
-	if len(b)%2 != 0 {
-		return "", fmt.Errorf("slice must have an even length (length=%d)", len(b))
-	}
-
-	s := make([]uint16, len(b)/2)
-	for i := range s {
-		s[i] = uint16(b[i*2]) + uint16(b[(i*2)+1])<<8
-	}
-
-	return string(utf16.Decode(s)), nil
 }
 
 // from https://github.com/elastic/go-windows/ntdll.go, but with Environment added
@@ -420,60 +304,6 @@ func _virtualFreeEx(processHandle syscall.Handle, address uintptr, size uintptr,
 	return err
 }
 
-func _virtualQueryEx(processHandle syscall.Handle, address uintptr, buffer uintptr, size uintptr, nRead *uintptr) (err error) {
-	r1, _, e1 := syscall.Syscall6(procVirtualQueryEx.Addr(), 4, uintptr(processHandle), uintptr(address), uintptr(buffer), uintptr(size),
-		0, 0)
-	if r1 == 0 {
-		err = getSyscallErr(e1)
-	}
-	*nRead = r1
-	return err
-}
-
-func virtualQueryEx(processHandle syscall.Handle, baseAddress uintptr, dest []byte) (nRead uintptr, err error) {
-	n := len(dest)
-	if n == 0 {
-		return 0, nil
-	}
-	if err = _virtualQueryEx(processHandle, baseAddress, uintptr(unsafe.Pointer(&dest[0])), uintptr(n), &nRead); err != nil {
-		return 0, err
-	}
-	return nRead, nil
-}
-
-func getProcessEnv(processHandle syscall.Handle, params RtlUserProcessParameters) (env string, err error) {
-	// get the size of the env variables block
-	mbiBuf := make([]byte, SizeOfMemoryBasicInformation)
-	nRead, err := virtualQueryEx(processHandle, params.Environment, mbiBuf)
-	if err != nil {
-		return env, err
-	}
-	if nRead != uintptr(SizeOfMemoryBasicInformation) {
-		return env, errors.Errorf("MEMORY_BASIC_INFORMATION: short read (%d/%d)", nRead, SizeOfMemoryBasicInformation)
-	}
-
-	mbi := *(*MemoryBasicInformation)(unsafe.Pointer(&mbiBuf[0]))
-
-	// read the content of the env variables block
-	envSize := mbi.RegionSize - (uintptr(params.Environment) - uintptr(mbi.BaseAddress))
-
-	envBuf := make([]byte, envSize)
-	nRead, err = windows.ReadProcessMemory(processHandle, params.Environment, envBuf)
-	if err != nil {
-		return env, err
-	}
-	if nRead != uintptr(envSize) {
-		return env, errors.Errorf("Environment string: short read: (%d/%d)", nRead, envSize)
-	}
-
-	env, err = utf16BytesToString(envBuf)
-	if err != nil {
-		return env, err
-	}
-
-	return env, nil
-}
-
 func getShell() (shell string) {
 	shell = os.Getenv("COMSPEC")
 	if shell == "" {
@@ -522,18 +352,14 @@ func getSignalsToSend(childProcessName string, noStopExes []string, noKillExes [
 	return signalsToSend, err
 }
 
-func doesChildHaveMarker(processHandle int) (hasMarker bool, err error) {
+func doesChildHaveMarker(pid int, processHandle int) (hasMarker bool, err error) {
 	err = nil
 	hasMarker = false
-	winProcessHandle := syscall.Handle(processHandle)
-	pbi, err := getProcessBasicInformation(winProcessHandle)
+	process, err := psutil.NewProcess(int32(pid))
 	if err == nil {
-		userProcParams, err := getUserProcessParams(winProcessHandle, pbi)
-		if err == nil {
-			env, err := getProcessEnv(winProcessHandle, userProcParams)
-			if err == nil {
-				hasMarker = containsMarker(env)
-			}
+		env, err := process.Environ()
+		if env != nil && err == nil {
+			hasMarker = containsMarker(strings.Join(env[:], ";"))
 		}
 	}
 	return hasMarker, err
@@ -856,6 +682,12 @@ func _signalProcess(processRecord ProcessRecord, signalNum int) (err error) {
 	default:
 		err = errors.New("Unexpected signalNum")
 	}
+	if err != nil {
+		if Verbose {
+			Log.Error(err)
+		}
+		return err
+	}
 
 	var is32BitChildProcess bool = true
 	if is64BitWindowsOS() {
@@ -927,6 +759,12 @@ func _signalProcess(processRecord ProcessRecord, signalNum int) (err error) {
 					err = errors.New("Unexpected signalNum KILL_SIGNAL")
 				default:
 					err = errors.New("Unexpected signalNum")
+				}
+				if err != nil {
+					if Verbose {
+						Log.Error(err)
+					}
+					return err
 				}
 				Log.Infof("%s to pid %s, waiting for response", msg, strconv.Itoa(processRecord.pid))
 			}
