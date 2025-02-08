@@ -353,7 +353,6 @@ func getSignalsToSend(childProcessName string, noStopExes []string, noKillExes [
 }
 
 func doesChildHaveMarker(process *psutil.Process, _ int) (hasMarker bool, err error) {
-	err = nil
 	hasMarker = false
 	env, err := process.Environ()
 	if env != nil && err == nil {
