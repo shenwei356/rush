@@ -469,17 +469,6 @@ func canSendSignal(childProcessName string, noSignalExes []string) (canSendSigna
 	return canSendSignal, err
 }
 
-var processHandleStartTimes = make(map[int]uint64)
-
-func getProcessStartTimeFromHandle(processHandle int) (startTime uint64, err error) {
-	startTime, keyPresent := processHandleStartTimes[processHandle]
-	if !keyPresent {
-		startTime, err = _getProcessStartTime(processHandle)
-		processHandleStartTimes[processHandle] = startTime
-	}
-	return
-}
-
 type ProcessRecord struct {
 	pid           int
 	processHandle int
@@ -490,7 +479,8 @@ type ProcessRecord struct {
 
 var pidRecords = make(map[int]ProcessRecord)
 
-func getProcessRecordFromPid(pid int) (processRecord ProcessRecord, err error) {
+func getProcessRecordFromPid(pidRecordsLock *sync.Mutex, pid int) (processRecord ProcessRecord, err error) {
+	pidRecordsLock.Lock()
 	processRecord, keyPresent := pidRecords[pid]
 	if !keyPresent {
 		processHandle, processExists, accessGranted, err := getProcess(pid)
@@ -504,24 +494,11 @@ func getProcessRecordFromPid(pid int) (processRecord ProcessRecord, err error) {
 			pidRecords[pid] = processRecord
 		}
 	}
+	pidRecordsLock.Unlock()
 	return
 }
 
-func getProcessStartTimeFromPid(pid int) (startTime uint64, err error) {
-	startTime = 0
-	processRecord, err := getProcessRecordFromPid(pid)
-	if processRecord.processHandle != INVALID_HANDLE && err == nil {
-		startTime, err = getProcessStartTimeFromHandle(processRecord.processHandle)
-	}
-	return
-}
-
-type ChildCheckRecord struct {
-	process    *psutil.Process
-	knownChild bool
-}
-
-func checkChildProcess(childCheckRecord ChildCheckRecord, noStopExes []string, noKillExes []string) (
+func checkChildProcess(pidRecordsLock *sync.Mutex, childCheckProcess *psutil.Process, noStopExes []string, noKillExes []string) (
 	processHandle int,
 	considerChild bool,
 	signalsToSend int,
@@ -529,42 +506,18 @@ func checkChildProcess(childCheckRecord ChildCheckRecord, noStopExes []string, n
 	considerChild = false          // first assume false
 	signalsToSend = SEND_NO_SIGNAL // first assume no signal
 	// use err2 for getProcessRecordFromPid(), since child may no longer exist
-	processRecord, err2 := getProcessRecordFromPid(int(childCheckRecord.process.Pid))
+	processRecord, err2 := getProcessRecordFromPid(pidRecordsLock, int(childCheckProcess.Pid))
 	processHandle = processRecord.processHandle
 	if err2 == nil {
 		if processHandle != INVALID_HANDLE {
-			doEnvCheck := true // first assume true
-			if childCheckRecord.knownChild {
-				// use err3 for the next operations, since
-				// we may fallback to env check below
-				processStartTime, err3 := getProcessStartTimeFromHandle(processHandle)
-				if err3 == nil {
-					parentPid, err3 := childCheckRecord.process.Ppid() // get parent pid
-					if err3 == nil {
-						// use err3 for getProcessStartTimeFromPid(), since parent may no longer exist
-						parentStartTime, err3 := getProcessStartTimeFromPid(int(parentPid))
-						if err3 == nil {
-							if processStartTime >= parentStartTime {
-								// this our child and
-								// not from a previous parent with reused pid,
-								// so we can skip the env check
-								doEnvCheck = false
-								considerChild = true
-							}
-						}
-					}
-				}
-			}
-			if doEnvCheck {
-				// handle the orphaned child case
-				// by looking at the env
-				considerChild, err = doesChildHaveMarker(processHandle)
-			}
+			// Don't look at parent-child relationships, since children, grandchildren, etc.
+			// could become orphaned at any time. Just look for the child marker to know.
+			considerChild, err = doesChildHaveMarker(childCheckProcess, processHandle)
 			if err == nil {
 				if considerChild {
 					var childProcessName string = ""
 					if len(noStopExes) > 0 || len(noKillExes) > 0 {
-						childProcessName, err = childCheckRecord.process.Name()
+						childProcessName, err = childCheckProcess.Name()
 						if err == nil {
 							if len(childProcessName) == 0 {
 								err = errors.New("childProcessName is empty")
@@ -608,16 +561,18 @@ func checkChildProcess(childCheckRecord ChildCheckRecord, noStopExes []string, n
 
 // get process tree in bottom up order
 func getProcessTreeRecursive(
-	childCheckRecord ChildCheckRecord,
+	pidRecordsLock *sync.Mutex,
+	childCheckProcess *psutil.Process,
 	noStopExes []string,
 	noKillExes []string,
 	pidsVisited *IntSet,
 ) (processRecords []ProcessRecord) {
-	if considerPid(int(childCheckRecord.process.Pid)) {
+	if considerPid(int(childCheckProcess.Pid)) {
 		// avoid cycles in pid tree by looking at visited set
-		if pidsVisited.Add(int(childCheckRecord.process.Pid)) {
+		if pidsVisited.Add(int(childCheckProcess.Pid)) {
 			processHandle, considerChild, signalsToSend, err := checkChildProcess(
-				childCheckRecord,
+				pidRecordsLock,
+				childCheckProcess,
 				noStopExes,
 				noKillExes)
 			if err != nil {
@@ -627,7 +582,7 @@ func getProcessTreeRecursive(
 			}
 			if processHandle != INVALID_HANDLE {
 				if considerChild {
-					grandChildren, err := childCheckRecord.process.Children()
+					grandChildren, err := childCheckProcess.Children()
 					if err != nil {
 						if err == psutil.ErrorNoChildren {
 							// ignore this error
@@ -640,10 +595,9 @@ func getProcessTreeRecursive(
 					} else {
 						if grandChildren != nil {
 							for _, grandChildProcess := range grandChildren {
-								var grandChildCheckRecord = ChildCheckRecord{
-									process: grandChildProcess, knownChild: childCheckRecord.knownChild}
 								subProcessRecords := getProcessTreeRecursive(
-									grandChildCheckRecord,
+									pidRecordsLock,
+									grandChildProcess,
 									noStopExes,
 									noKillExes,
 									pidsVisited)
@@ -654,10 +608,12 @@ func getProcessTreeRecursive(
 						}
 					}
 					var processRecord = ProcessRecord{
-						processHandle: processHandle, pid: int(childCheckRecord.process.Pid), signalsToSend: signalsToSend}
+						processHandle: processHandle, pid: int(childCheckProcess.Pid), signalsToSend: signalsToSend}
 					processRecords = append(processRecords, processRecord)
 				} else {
-					releaseProcessByPid(int(childCheckRecord.process.Pid))
+					pidRecordsLock.Lock()
+					releaseProcessByPid(int(childCheckProcess.Pid))
+					pidRecordsLock.Unlock()
 				}
 			}
 		}
@@ -665,55 +621,10 @@ func getProcessTreeRecursive(
 	return processRecords
 }
 
-func getChildProcesses(noStopExes []string, noKillExes []string) (processRecords []ProcessRecord) {
-	var childCheckRecords []ChildCheckRecord
-
-	// to handle non-orphaned children, get our immediate children
-	thisProcess, err := psutil.NewProcess(int32(os.Getpid()))
-	if err == nil {
-		immediateChildren, err := thisProcess.Children()
-		if err == nil {
-			if immediateChildren != nil {
-				for _, process := range immediateChildren {
-					var childCheckRecord = ChildCheckRecord{
-						process: process, knownChild: true} // process is known to be our child
-					childCheckRecords = append(childCheckRecords, childCheckRecord)
-				}
-			}
-		} else {
-			if err == psutil.ErrorNoChildren {
-				// ignore this error
-				err = nil
-			} else {
-				if Verbose {
-					Log.Error(err)
-				}
-			}
-		}
-	} else {
-		if Verbose {
-			Log.Error(err)
-		}
-	}
-
-	if err == nil {
-		// to handle orphaned children, get all processes
-		// we'll check for duplicates later
-		allProcesses, err := psutil.Processes()
-		if err == nil {
-			if allProcesses != nil {
-				for _, process := range allProcesses {
-					var childCheckRecord = ChildCheckRecord{
-						process: process, knownChild: false} // process may or may not be our child
-					childCheckRecords = append(childCheckRecords, childCheckRecord)
-				}
-			}
-		} else {
-			if Verbose {
-				Log.Error(err)
-			}
-		}
-	}
+func getChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillExes []string) (processRecords []ProcessRecord) {
+	// handle normal and orphaned children by getting all processes
+	// we'll check for duplicates later
+	allProcesses, err := psutil.Processes()
 
 	if err == nil {
 		// pidsVisited := IntSet{set: make(map[int]bool)}
@@ -732,13 +643,14 @@ func getChildProcesses(noStopExes []string, noKillExes []string) (processRecords
 		tokens := make(chan int, threads)
 		var wg sync.WaitGroup
 
-		for _, childCheckRecord := range childCheckRecords {
+		for _, childCheckProcess := range allProcesses {
 
 			wg.Add(1)
 			tokens <- 1
-			go func(childCheckRecord ChildCheckRecord) {
+			go func(childCheckProcess *psutil.Process) {
 				subProcessRecords := getProcessTreeRecursive(
-					childCheckRecord,
+					pidRecordsLock,
+					childCheckProcess,
 					noStopExes,
 					noKillExes,
 					&pidsVisited)
@@ -749,7 +661,7 @@ func getChildProcesses(noStopExes []string, noKillExes []string) (processRecords
 
 				wg.Done()
 				<-tokens
-			}(childCheckRecord)
+			}(childCheckProcess)
 		}
 
 		wg.Wait()
@@ -877,12 +789,12 @@ func pollKillProcess(processRecord ProcessRecord) (err error) {
 }
 
 // ensure our child processes are stopped
-func stopChildProcesses(noStopExes []string, noKillExes []string, cleanupTime time.Duration) (err error) {
+func stopChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillExes []string, cleanupTime time.Duration) (err error) {
 	err = nil            // first assume no error
 	anyRemaining := true // first assume some children
 	totalNumSignaled := 0
 	if canStopChildProcesses() {
-		processRecords := getChildProcesses(noStopExes, noKillExes)
+		processRecords := getChildProcesses(pidRecordsLock, noStopExes, noKillExes)
 		// progress from most graceful to most invasive stop signal
 		// if no matching children, then call is a noop
 		numSignaled := signalChildProcesses(processRecords, CTRL_C_SIGNAL)
@@ -908,7 +820,7 @@ func stopChildProcesses(noStopExes []string, noKillExes []string, cleanupTime ti
 		anyRemaining = pollRemainingChildren(processRecords, 0) // wait zero time, since already waited above
 		// release process handles only after descending into all processes,
 		// to ensure pids do not get reused while descending
-		releaseProcesses()
+		releaseProcesses(pidRecordsLock)
 	}
 	if anyRemaining && totalNumSignaled == 0 {
 		msg := "No child processes stopped or killed\n"
@@ -920,6 +832,7 @@ func stopChildProcesses(noStopExes []string, noKillExes []string, cleanupTime ti
 }
 
 func releaseProcessByPid(pid int) {
+	// no pidRecordsLock here, rely on caller to do it
 	processRecord, keyPresent := pidRecords[pid]
 	if !keyPresent {
 		delete(pidRecords, processRecord.pid)
@@ -927,10 +840,12 @@ func releaseProcessByPid(pid int) {
 	}
 }
 
-func releaseProcesses() {
+func releaseProcesses(pidRecordsLock *sync.Mutex) {
+	pidRecordsLock.Lock()
 	for _, processRecord := range pidRecords {
 		releaseProcessByPid(processRecord.pid)
 	}
+	pidRecordsLock.Unlock()
 }
 
 func getChildMarkerKey() string {
@@ -1037,7 +952,7 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 			// ensure we only initiate the stop attempt once,
 			// from all our command threads
 			stopOnce.Do(func() {
-				err = stopChildProcesses(opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
+				err = stopChildProcesses(&opts.PidRecordsLock, opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
 				if err != nil {
 					if Verbose {
 						Log.Error(err)
@@ -1203,6 +1118,7 @@ type Options struct {
 	PrintRetryOutput    bool          // print output from retries
 	Timeout             time.Duration // timeout
 	StopOnErr           bool          // stop on any error
+	PidRecordsLock      sync.Mutex    // make stop on error thread-safe
 	NoStopExes          []string      // exe names to exclude from stop signal
 	NoKillExes          []string      // exe names to exclude from kill signal
 	CleanupTime         time.Duration // time to allow children to clean up
@@ -1452,7 +1368,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 									if opts.StopOnErr {
 										Log.Error("stop on first error")
 									}
-									err = stopChildProcesses(opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
+									err = stopChildProcesses(&opts.PidRecordsLock, opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
 									if err != nil {
 										if Verbose {
 											Log.Error(err)
