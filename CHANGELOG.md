@@ -1,4 +1,5 @@
 - rush v0.6.1
+    - Fix issue with stopping orphan children. [#69](https://github.com/shenwei356/rush/pull/69) by @bburgin
     - when the field index is larger than the number of fields, do not replace it with the last field as before. [#68](https://github.com/shenwei356/rush/issues/68)
 - rush v0.6.0
     - fix variables containing "{}", the bug was introduced in v0.5.7, e.g., `rush -v 'p={}/{%}' 'echo {p}_1.fq'` outputs `a/b/b_1.fq`.
