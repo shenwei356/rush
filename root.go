@@ -78,7 +78,8 @@ Replacement strings in commands:
   {.}         remove the last file extension
   {:}         remove all file extensions.
   {^suffix}   remove suffix
-  {@regexp}   capture submatch using regular expression
+  {@regexp}   capture submatch using regular expression.
+              Limitation: curly brackets can't be used in the regexp.
 
   Escaping curly brackets "{}":
     {{}}        {}

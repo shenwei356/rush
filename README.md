@@ -68,7 +68,8 @@ Major:
         - `{.}`, remove the last file extension. (Same in GNU parallel)
         - `{:}`, remove all file extensions (***Not directly supported in GNU parallel***)
         - `{^suffix}`, remove `suffix` (***Not directly supported in GNU parallel***)
-        - `{@regexp}`, capture submatch using regular expression (***Not directly supported in GNU parallel***)
+        - `{@regexp}`, capture submatch using regular expression (***Not directly supported in GNU parallel***).
+           There's a limitation here: curly brackets can't be used in the regular expression.
     - Combinations
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
@@ -207,6 +208,7 @@ Replacement strings in commands:
   {:}         remove all file extensions.
   {^suffix}   remove suffix
   {@regexp}   capture submatch using regular expression
+              Limitation: curly brackets can't be used in the regexp.
 
   Escaping curly brackets "{}":
     {{}}        {}
