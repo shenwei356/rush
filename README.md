@@ -57,7 +57,8 @@ Major:
 - **Settable records sending to every command** (`-n`, default `1`). (`-n/--max-args` in GNU parallel)
 - **Settable field delimiter** (`-d`, default `\s+`). (Same `-d/--delimiter` in GNU parallel)
 - **Practical replacement strings** (like GNU parallel):
-    - `{{}}`, "{}" itself
+    - `{{}}`, `{}` itself
+    - `{{1,}}`, `{1,}`.
     - `{#}`, job ID. (Same in GNU parallel)
     - `{}`, full data. (Same in GNU parallel)
     - `{n}`, `n`th field in delimiter-delimited data. (Same in GNU parallel)
@@ -107,20 +108,20 @@ Or use [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-install
 
 #### Method 1: Download binaries
 
-[rush v0.6.1](https://github.com/shenwei356/rush/releases/tag/v0.6.1)
-[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.6.1/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.6.1)
+[rush v0.7.0](https://github.com/shenwei356/rush/releases/tag/v0.7.0)
+[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.7.0/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.7.0)
 
 ***Tip: run `rush -V` to check update !!!***
 
 OS     |Arch      |File, (中国镜像)                                                                                                                                                                         |Download Count
 :------|:---------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_linux_386.tar.gz)
-Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_linux_amd64.tar.gz)
-Linux  |**arm64** |[**rush_linux_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_linux_arm64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_arm64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_linux_arm64.tar.gz)
-OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_darwin_amd64.tar.gz)
-OS X   |**arm64** |[**rush_darwin_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_darwin_arm64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_arm64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_darwin_arm64.tar.gz)
-Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_windows_386.exe.tar.gz)
-Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.6.1/rush_windows_amd64.exe.tar.gz)
+Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_386.tar.gz)
+Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_amd64.tar.gz)
+Linux  |**arm64** |[**rush_linux_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_arm64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_arm64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_arm64.tar.gz)
+OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_darwin_amd64.tar.gz)
+OS X   |**arm64** |[**rush_darwin_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_darwin_arm64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_arm64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_darwin_arm64.tar.gz)
+Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_windows_386.exe.tar.gz)
+Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_windows_amd64.exe.tar.gz)
 
 
 Just [download](https://github.com/shenwei356/rush/releases) compressed
@@ -146,9 +147,9 @@ And then:
 #### Method 3: Compiling from source
 
     # download Go from https://go.dev/dl
-    wget https://go.dev/dl/go1.17.13.linux-amd64.tar.gz
+    wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz
     
-    tar -zxf go1.17.13.linux-amd64.tar.gz -C $HOME/
+    tar -zxf go1.24.4.linux-amd64.tar.gz -C $HOME/
     
     # or 
     #   echo "export PATH=$PATH:$HOME/go/bin" >> ~/.bashrc
@@ -172,7 +173,7 @@ And then:
 ```text
 rush -- a cross-platform command-line tool for executing jobs in parallel
 
-Version: 0.5.7
+Version: 0.7.0
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -201,12 +202,17 @@ Replacement strings in commands:
   {#}         job ID
   {n}         nth field in delimiter-delimited data
   {/}         dirname
-  {%}         basename
+  {%}        basename
   {.}         remove the last file extension
   {:}         remove all file extensions.
   {^suffix}   remove suffix
   {@regexp}   capture submatch using regular expression
-  {{}}        "{}" itself
+
+  Escaping curly brackets "{}":
+    {{}}        {}
+    {{1}}       {1}
+    {{1,}}      {1,}
+    {{a}}       {a}
 
   Combinations:
     {%.}, {%:}          basename without extension
@@ -224,7 +230,7 @@ Preset variable (macro):
      c c.csv
 
 Usage:
-  rush [flags] [command]
+  rush [flags] [command] 
 
 Examples:
   1. simple run, quoting is not necessary
@@ -275,7 +281,12 @@ Examples:
   14. escape special symbols
       $ seq 1 | rush 'echo -e "a\tb" | awk "{print $1}"' -q
       a
-  15. run a command with relative paths in Windows, please use backslash as the separator.
+  15. escape curly brackets "{}"
+      $ echo aaa bbb ccc | sed -E "s/(\S){3,}/\1/g"
+      a b c
+      $ echo 1 | rush 'echo aaa bbb ccc | sed -E "s/(\S){{3,}}/\1/g"' --dry-run
+      echo aaa bbb ccc | sed -E "s/(\S){3,}/\1/g"
+  16. run a command with relative paths in Windows, please use backslash as the separator.
       # "brename -l -R" is used to search paths recursively
       $ brename -l -q -R -i -p "\.go$" | rush "bin\app.exe {}"
 
@@ -363,7 +374,7 @@ Flags:
         python: can't open file 'unexisted_script.py': [Errno 2] No such file or directory
         [ERRO] wait command: python unexisted_script.py: exit status 2
 
-1. Input containing `{}` (since v0.6.1)
+1. Input containing `{}` (since v0.7.0)
 
         $ echo "a attr{href}"="h4 text{}" | rush -T b -k -D "=" 'echo "{}"'
         a attr{href}
@@ -374,7 +385,7 @@ Flags:
         b{{}}
         c{d}
 
-1. Output `{}` itself (since v0.6.1)
+1. Output `{}` itself (since v0.7.0)
 
         $ echo abc | rush 'echo "{} {{}}"'
         abc {}

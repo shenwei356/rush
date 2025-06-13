@@ -1,3 +1,5 @@
+- rush v0.7.0
+    - Better support for escaping curly brackets. [#71](https://github.com/shenwei356/rush/issues/71)
 - rush v0.6.1
     - Fix issue with stopping orphan children. [#69](https://github.com/shenwei356/rush/pull/69) by @bburgin
     - when the field index is larger than the number of fields, do not replace it with the last field as before. [#68](https://github.com/shenwei356/rush/issues/68)

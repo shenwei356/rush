@@ -33,16 +33,11 @@ var rePlaceHolder = regexp.MustCompile(`\{([^\{\}}]*)\}`)
 var reChars = regexp.MustCompile(`\d+|.`)
 var reCharsCheck = regexp.MustCompile(`^(\d+)*.*$`)
 
-var rePairedBrackets = regexp.MustCompile(`\{\}`)
-var rePairedBrackets2 = regexp.MustCompile(`\{\{\}\}`)
-var pairedBracketsReplace = "shenwei356_rush_magic"
-
 func fillCommand(config Config, command string, chunk Chunk) (string, error) {
-	s, err := _fillCommand(config, rePairedBrackets2.ReplaceAllString(command, pairedBracketsReplace), chunk)
+	s, err := _fillCommand(config, command, chunk)
 	if err != nil {
 		return s, err
 	}
-	s = strings.ReplaceAll(s, pairedBracketsReplace, "{}")
 	return s, err
 }
 
@@ -72,18 +67,30 @@ func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 		return "", nil
 	}
 
-	if rePairedBrackets.MatchString(fieldsStr) {
-		fieldsStr = rePairedBrackets.ReplaceAllString(fieldsStr, pairedBracketsReplace)
-	}
-
 	var fields []string
 
 	var chars, char, target string
 	var charsGroups []string
 	var i, j int
 	var buf bytes.Buffer
+	l := len(command) - 2
 	for _, found := range founds {
+		if found[2] >= 2 && found[3] <= l && command[found[2]-2] == '{' && command[found[3]+1] == '}' {
+			if config.GreedyCount > 0 {
+				target = command[found[2]-2 : found[3]+2]
+			} else {
+				target = command[found[2]-1 : found[3]+1]
+			}
+
+			buf.WriteString(command[j : found[0]-1])
+			buf.WriteString(target)
+			j = found[3] + 2
+
+			continue
+		}
+
 		chars = command[found[2]:found[3]]
+
 		target = fieldsStr
 
 		if chars == "" {

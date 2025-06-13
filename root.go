@@ -79,7 +79,12 @@ Replacement strings in commands:
   {:}         remove all file extensions.
   {^suffix}   remove suffix
   {@regexp}   capture submatch using regular expression
-  {{}}        "{}" itself
+
+  Escaping curly brackets "{}":
+    {{}}        {}
+    {{1}}       {1}
+    {{1,}}      {1,}
+    {{a}}       {a}
 
   Combinations:
     {%%.}, {%%:}          basename without extension
@@ -568,7 +573,12 @@ func init() {
   14. escape special symbols
       $ seq 1 | rush 'echo -e "a\tb" | awk "{print $1}"' -q
       a
-  15. run a command with relative paths in Windows, please use backslash as the separator.
+  15. escape curly brackets "{}"
+      $ echo aaa bbb ccc | sed -E "s/(\S){3,}/\1/g"
+      a b c
+      $ echo 1 | rush 'echo aaa bbb ccc | sed -E "s/(\S){{3,}}/\1/g"' --dry-run
+      echo aaa bbb ccc | sed -E "s/(\S){3,}/\1/g"
+  16. run a command with relative paths in Windows, please use backslash as the separator.
       # "brename -l -R" is used to search paths recursively
       $ brename -l -q -R -i -p "\.go$" | rush "bin\app.exe {}"
 
