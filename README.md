@@ -193,7 +193,7 @@ Input:
 Output:
   - Outputs of all commands are written to STDOUT by default,
     you can also use -o/--out-file to specify a output file.
-  - Outputs of all commands are random, you can use the flag -k/--kep-order
+  - Outputs of all commands are random, you can use the flag -k/--keep-order
     to keep output in order of input.
   - Outputs of all commands are buffered, you can use the flag -I/--immediate-output
     to print output immediately and interleaved.
