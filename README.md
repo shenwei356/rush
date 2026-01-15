@@ -109,20 +109,22 @@ Or use [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-install
 
 #### Method 1: Download binaries
 
-[rush v0.7.0](https://github.com/shenwei356/rush/releases/tag/v0.7.0)
-[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.7.0/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.7.0)
+[rush v0.8.0](https://github.com/shenwei356/rush/releases/tag/v0.8.0)
+[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.8.0/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.8.0)
 
 ***Tip: run `rush -V` to check update !!!***
 
-OS     |Arch      |File, (中国镜像)                                                                                                                                                                         |Download Count
-:------|:---------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_386.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_386.tar.gz))                            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_386.tar.gz)
-Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_amd64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_amd64.tar.gz)
-Linux  |**arm64** |[**rush_linux_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_arm64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_linux_arm64.tar.gz))                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_linux_arm64.tar.gz)
-OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_darwin_amd64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_amd64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_darwin_amd64.tar.gz)
-OS X   |**arm64** |[**rush_darwin_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_darwin_arm64.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_darwin_arm64.tar.gz))               |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_darwin_arm64.tar.gz)
-Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_windows_386.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_386.exe.tar.gz))          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_windows_386.exe.tar.gz)
-Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_windows_amd64.exe.tar.gz), ([mirror](http://app.shenwei.me/data/rush/rush_windows_amd64.exe.tar.gz))|[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.7.0/rush_windows_amd64.exe.tar.gz)
+OS     |Arch      |File,                                                                                                                           |Download Count
+:------|:---------|:-------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_linux_386.tar.gz)                      |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_linux_386.tar.gz)
+Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_linux_amd64.tar.gz)              |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_linux_amd64.tar.gz)
+Linux  |**arm64** |[**rush_linux_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_linux_arm64.tar.gz)              |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_linux_arm64.tar.gz)
+OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_darwin_amd64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_darwin_amd64.tar.gz)
+OS X   |**arm64** |[**rush_darwin_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_darwin_arm64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_darwin_arm64.tar.gz)
+Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_windows_386.exe.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_windows_386.exe.tar.gz)
+Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_windows_amd64.exe.tar.gz)  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_windows_amd64.exe.tar.gz)
+FreeBSD|32-bit    |[rush_freebsd_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_freebsd_386.tar.gz)                  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_freebsd_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_freebsd_386.tar.gz)
+FreeBSD|**64-bit**|[**rush_freebsd_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_freebsd_amd64.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_freebsd_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.8.0/rush_freebsd_amd64.tar.gz)
 
 
 Just [download](https://github.com/shenwei356/rush/releases) compressed
@@ -174,7 +176,7 @@ And then:
 ```text
 rush -- a cross-platform command-line tool for executing jobs in parallel
 
-Version: 0.7.0
+Version: 0.8.0
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -207,7 +209,7 @@ Replacement strings in commands:
   {.}         remove the last file extension
   {:}         remove all file extensions.
   {^suffix}   remove suffix
-  {@regexp}   capture submatch using regular expression
+  {@regexp}   capture submatch using regular expression.
               Limitation: curly brackets can't be used in the regexp.
 
   Escaping curly brackets "{}":
@@ -217,8 +219,9 @@ Replacement strings in commands:
     {{a}}       {a}
 
   Combinations:
-    {%.}, {%:}          basename without extension
-    {2.}, {2/}, {2%.}   manipulate nth field
+    {%.}, {%:}            basename without extension
+    {2.}, {2/}, {2%.}     manipulate nth field
+    {file:}, {file:^_1}   remove all extension of a preset variable (see below)
 
 Preset variable (macro):
   1. You can pass variables to the command like awk via the option -v. E.g.,
@@ -226,7 +229,9 @@ Preset variable (macro):
      prefix_3_suffix
      prefix_1_suffix
      prefix_2_suffix
-  2. The value could also contain replacement strings.
+  2. A variable name should start with a letter and be followed by letters, digits, or underscores.
+     A regular expression is used to check them: ^[a-zA-Z][A-Za-z0-9_]*$
+  3. The value could also contain replacement strings.
      # {p} will be replaced with {%:}, which computes the basename and remove all file extensions.
      $ echo a/b/c.txt.gz | rush -v 'p={%:}' 'echo {p} {p}.csv'
      c c.csv
@@ -271,6 +276,10 @@ Examples:
       # seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei,lname=Shen
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
+
+      # preset variables support extra operations as well.
+      echo read_1.fq.gz | ./rush -v 'p={:^_1}' -v 'f=a.s-10.txt' 'echo {} {p} {f:} {f@s\-(\d+)}'
+      read_1.fq.gz read a 10
   12. preset variable (Macro)
       # equal to: echo sample_1.fq.gz | rush 'echo {:^_1} {} {:^_1}_2.fq.gz'
       $ echo sample_1.fq.gz | rush -v p={:^_1} 'echo {p} {} {p}_2.fq.gz'
@@ -468,7 +477,7 @@ Flags:
         FASTA record 2: name: seq2 sequence: AAAA
         FASTA record 3: name: seq3 sequence: CCCC
 
-1. Assign value to variable, like `awk -v` (`-v`)
+1. **Assign value to variable**, like `awk -v` (`-v`)
 
         $ seq 1  | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
         Hello, Wei Shen!
@@ -485,6 +494,11 @@ Flags:
         var: b, data: 1
         var: b, data: 2
         var: b, data: 3
+        
+1. Preset variables support extra operations as well!!!
+
+        $ echo read_1.fq.gz | ./rush -v 'p={:^_1}' -v 'f=a.s-10.txt' 'echo {} {p} {f:} {f@s\-(\d+)}'
+        read_1.fq.gz read a 10
 
 1. **Preset variable** (`-v`), avoid repeatedly writing verbose replacement strings
 

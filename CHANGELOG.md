@@ -1,3 +1,9 @@
+- rush v0.8.0
+    - Preset variables support extra operations as well. e.g,
+    
+            $ echo read_1.fq.gz | ./rush -v 'p={:^_1}' -v 'f=a.s-10.txt' 'echo {} {p} {f:} {f@s\-(\d+)}'
+            read_1.fq.gz read a 10
+            
 - rush v0.7.0
     - Better support for escaping curly brackets. [#71](https://github.com/shenwei356/rush/issues/71)
 - rush v0.6.1

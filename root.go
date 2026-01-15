@@ -88,8 +88,9 @@ Replacement strings in commands:
     {{a}}       {a}
 
   Combinations:
-    {%%.}, {%%:}          basename without extension
-    {2.}, {2/}, {2%%.}   manipulate nth field
+    {%%.}, {%%:}            basename without extension
+    {2.}, {2/}, {2%%.}     manipulate nth field
+    {file:}, {file:^_1}   remove all extension of a preset variable (see below)
 
 Preset variable (macro):
   1. You can pass variables to the command like awk via the option -v. E.g.,
@@ -97,7 +98,9 @@ Preset variable (macro):
      prefix_3_suffix
      prefix_1_suffix
      prefix_2_suffix
-  2. The value could also contain replacement strings.
+  2. A variable name should start with a letter and be followed by letters, digits, or underscores.
+     A regular expression is used to check them: ^[a-zA-Z][A-Za-z0-9_]*$
+  3. The value could also contain replacement strings.
      # {p} will be replaced with {%%:}, which computes the basename and remove all file extensions.
      $ echo a/b/c.txt.gz | rush -v 'p={%%:}' 'echo {p} {p}.csv'
      c c.csv
@@ -562,6 +565,10 @@ func init() {
       # seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei,lname=Shen
       $ seq 1 | rush 'echo Hello, {fname} {lname}!' -v fname=Wei -v lname=Shen
       Hello, Wei Shen!
+
+      # preset variables support extra operations as well.
+      echo read_1.fq.gz | ./rush -v 'p={:^_1}' -v 'f=a.s-10.txt' 'echo {} {p} {f:} {f@s\-(\d+)}'
+      read_1.fq.gz read a 10
   12. preset variable (Macro)
       # equal to: echo sample_1.fq.gz | rush 'echo {:^_1} {} {:^_1}_2.fq.gz'
       $ echo sample_1.fq.gz | rush -v p={:^_1} 'echo {p} {} {p}_2.fq.gz'
@@ -656,7 +663,7 @@ type Config struct {
 }
 
 // var=value
-var reAssign = regexp.MustCompile(`\s*([^=]+)\s*=(.+)`)
+var reAssign = regexp.MustCompile(`\s*([a-zA-Z][A-Za-z0-9_]*)\s*=(.+)`)
 
 func getConfigs(cmd *cobra.Command) Config {
 	trim := getFlagString(cmd, "trim")
@@ -676,13 +683,9 @@ func getConfigs(cmd *cobra.Command) Config {
 	for _, s := range assignStrs {
 		if reAssign.MatchString(s) {
 			found := reAssign.FindStringSubmatch(s)
-			switch found[1] {
-			case ".", ":", "/", "%", "#", "^":
-				checkError(fmt.Errorf(`"var" in --v/--assign var=val should not be ".", ":", "/", "%%", "^" or "#", given: "%s"`, found[1]))
-			}
 			assignMap[found[1]] = found[2]
 		} else {
-			checkError(fmt.Errorf(`illegal value for flag -v/--assign (format: "var=value", e.g., "-v 'a=a bc'"): %s`, s))
+			checkError(fmt.Errorf(`illegal value for flag -v/--assign (format: "var=value", type "rush -h" for more details): %s`, s))
 		}
 	}
 

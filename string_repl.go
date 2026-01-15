@@ -32,6 +32,7 @@ import (
 var rePlaceHolder = regexp.MustCompile(`\{([^\{\}}]*)\}`)
 var reChars = regexp.MustCompile(`\d+|.`)
 var reCharsCheck = regexp.MustCompile(`^(\d+)*.*$`)
+var reVariable = regexp.MustCompile(`^([a-zA-Z][A-Za-z0-9_]*)`)
 
 func fillCommand(config Config, command string, chunk Chunk) (string, error) {
 	s, err := _fillCommand(config, command, chunk)
@@ -43,10 +44,11 @@ func fillCommand(config Config, command string, chunk Chunk) (string, error) {
 
 func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 	founds := rePlaceHolder.FindAllStringSubmatchIndex(command, -1)
-	if len(founds) == 0 {
+	if len(founds) == 0 { // no place holder
 		return command, nil
 	}
 
+	// trim space in the input data
 	records := make([]string, len(chunk.Data))
 	for i, r := range chunk.Data {
 		switch config.Trim {
@@ -63,6 +65,7 @@ func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 
 	fieldsStr := strings.Join(records, config.RecordsJoinSeparator)
 
+	// skip emtpy data
 	if fieldsStr == "" || fieldsStr == "\n" || fieldsStr == "\r\n" || fieldsStr == "\r" {
 		return "", nil
 	}
@@ -75,10 +78,11 @@ func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 	var buf bytes.Buffer
 	l := len(command) - 2
 	for _, found := range founds {
+		// somethings like these: {{}}, {{1}}, {{1,}}, {{a}}
 		if found[2] >= 2 && found[3] <= l && command[found[2]-2] == '{' && command[found[3]+1] == '}' {
-			if config.GreedyCount > 0 {
+			if config.GreedyCount > 0 { // keep the original content: {{}}
 				target = command[found[2]-2 : found[3]+2]
-			} else {
+			} else { // last round: output brackets: {}
 				target = command[found[2]-1 : found[3]+1]
 			}
 
@@ -89,30 +93,39 @@ func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 			continue
 		}
 
-		chars = command[found[2]:found[3]]
+		chars = command[found[2]:found[3]] // content between "{" and "}"
 
 		target = fieldsStr
-
-		if chars == "" {
+		if chars == "" { // {}
 			target = fieldsStr
-		} else if chars == "#" {
+		} else if chars == "#" { // {#}
 			target = fmt.Sprintf("%d", chunk.ID)
-		} else if !reCharsCheck.MatchString(chars) {
+		} else if !reCharsCheck.MatchString(chars) { // something weird
 			target = fmt.Sprintf("{%s}", chars)
 		} else {
-			if v, ok := config.AssignMap[chars]; ok { // key-value
-				target = v
-			} else {
+			// target = fieldsStr
+
+			// replace the possible predefind variable
+			found2 := reVariable.FindAllStringIndex(chars, 1)
+			if len(found2) > 0 { // rush -v file=abc.txt 'echo {file:}'
+				if v, ok := config.AssignMap[chars[found2[0][0]:found2[0][1]]]; ok { // check if the variable is definded
+					target = v
+
+					chars = chars[found2[0][1]:] // might be empty, e.g., {file}
+				}
+			}
+
+			if len(chars) > 0 { // for {file:} or {.}
 				charsGroups = reChars.FindAllString(chars, -1)
 
 				char = charsGroups[0]
 				if char[0] >= 48 && char[0] <= 57 { // digits, handle specific field
 					i, _ = strconv.Atoi(char)
 					if i == 0 {
-						target = fieldsStr
+						// target = fieldsStr
 					} else {
 						if len(fields) == 0 {
-							fields = config.reFieldDelimiter.Split(fieldsStr, -1)
+							fields = config.reFieldDelimiter.Split(target, -1)
 						}
 
 						if i > len(fields) {
@@ -123,8 +136,8 @@ func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 
 					}
 					i = 1
-				} else { // handle whole fieldStr
-					target = fieldsStr
+				} else { // handle whole fieldStr or value
+					// target = fieldsStr
 					i = 0
 				}
 
