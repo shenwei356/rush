@@ -90,7 +90,7 @@ Replacement strings in commands:
   Combinations:
     {%%.}, {%%:}            basename without extension
     {2.}, {2/}, {2%%.}     manipulate nth field
-    {file:}, {file:^_1}   remove all extension of a preset variable (see below)
+    {file:}, {file:^_1}   remove all extensions of a preset variable (see below)
 
 Preset variable (macro):
   1. You can pass variables to the command like awk via the option -v. E.g.,

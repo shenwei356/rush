@@ -15,7 +15,7 @@
   more advanced embeded replacement strings.
 
 These features make `rush` suitable for easily and flexibly parallelizing
-complex workflows in fields like Bioinformatics (see [examples](#examples) 18).
+complex workflows in fields like Bioinformatics (see [examples](#examples)).
 
 
 ## Table of Contents
@@ -73,6 +73,7 @@ Major:
     - Combinations
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
+        - `{file:}`, `{file:^_1}`, remove all extensions of a preset variable (see below)
 - **Preset variable (macro)**, e.g., `rush -v p={^suffix} 'echo {p}_new_suffix'`,
 where `{p}` is replaced with `{^suffix}`. (***Using Shell variable in GNU parallel***)
 
@@ -150,9 +151,9 @@ And then:
 #### Method 3: Compiling from source
 
     # download Go from https://go.dev/dl
-    wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz
+    wget https://go.dev/dl/go1.25.5.linux-amd64.tar.gz
     
-    tar -zxf go1.24.4.linux-amd64.tar.gz -C $HOME/
+    tar -zxf go1.25.5.linux-amd64.tar.gz -C $HOME/
     
     # or 
     #   echo "export PATH=$PATH:$HOME/go/bin" >> ~/.bashrc
@@ -221,7 +222,7 @@ Replacement strings in commands:
   Combinations:
     {%.}, {%:}            basename without extension
     {2.}, {2/}, {2%.}     manipulate nth field
-    {file:}, {file:^_1}   remove all extension of a preset variable (see below)
+    {file:}, {file:^_1}   remove all extensions of a preset variable (see below)
 
 Preset variable (macro):
   1. You can pass variables to the command like awk via the option -v. E.g.,
