@@ -71,7 +71,6 @@ Output:
 
 Replacement strings in commands:
   {}          full data
-  {#}         job ID
   {n}         nth field in delimiter-delimited data
   {/}         dirname
   {%%}         basename
@@ -80,6 +79,10 @@ Replacement strings in commands:
   {^suffix}   remove suffix
   {@regexp}   capture submatch using regular expression.
               Limitation: curly brackets can't be used in the regexp.
+  {#}         job ID
+  {?}         a value computed as $cpus / $jobs, which can be used as the number of
+              threads for each command. This value is dynamically adjusted according
+              to the number of jobs (-j/--jobs).
 
   Escaping curly brackets "{}":
     {{}}        {}

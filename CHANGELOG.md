@@ -1,3 +1,8 @@
+- rush v0.9.0
+    - Add a new replacement string `{?}`, a value computed as `$cpus / $jobs`, 
+      which can be used as the number of threads for each command. 
+      This value is dynamically adjusted according to the number of jobs (`-j/--jobs`). 
+      [#74](https://github.com/shenwei356/rush/issues/74)
 - rush v0.8.0
     - Preset variables support extra operations as well. e.g,
     

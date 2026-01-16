@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -180,6 +181,8 @@ func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 					case "@": // capturing group
 						captureGroup = true
 						break LOOP
+					case "?": // cpus / jobs
+						target = strconv.Itoa(max(runtime.NumCPU()/config.Jobs, 1))
 					default:
 						target = fmt.Sprintf("{%s}", chars)
 						break LOOP
