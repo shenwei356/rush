@@ -35,15 +35,15 @@ var reChars = regexp.MustCompile(`\d+|.`)
 var reCharsCheck = regexp.MustCompile(`^(\d+)*.*$`)
 var reVariable = regexp.MustCompile(`^([a-zA-Z][A-Za-z0-9_]*)`)
 
-func fillCommand(config Config, command string, chunk Chunk) (string, error) {
-	s, err := _fillCommand(config, command, chunk)
+func fillCommand(config Config, command string, chunk Chunk, NRemainingJobs int) (string, error) {
+	s, err := _fillCommand(config, command, chunk, NRemainingJobs)
 	if err != nil {
 		return s, err
 	}
 	return s, err
 }
 
-func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
+func _fillCommand(config Config, command string, chunk Chunk, nRemainingJobs int) (string, error) {
 	founds := rePlaceHolder.FindAllStringSubmatchIndex(command, -1)
 	if len(founds) == 0 { // no place holder
 		return command, nil
@@ -182,6 +182,7 @@ func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 						captureGroup = true
 						break LOOP
 					case "?": // cpus / jobs
+						// target = strconv.Itoa(max(runtime.NumCPU()/min(config.Jobs, nRemainingJobs), 1))
 						target = strconv.Itoa(max(runtime.NumCPU()/config.Jobs, 1))
 					default:
 						target = fmt.Sprintf("{%s}", chars)
@@ -223,5 +224,5 @@ func _fillCommand(config Config, command string, chunk Chunk) (string, error) {
 		return buf.String(), nil
 	}
 	config.GreedyCount--
-	return _fillCommand(config, buf.String(), chunk)
+	return _fillCommand(config, buf.String(), chunk, nRemainingJobs)
 }

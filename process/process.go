@@ -1294,9 +1294,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 
 	chCmd := make(chan *Command, opts.Jobs)
 	var chSuccessfulCmd chan string
-	if opts.RecordSuccessfulCmd {
-		chSuccessfulCmd = make(chan string, opts.Jobs)
-	}
+	chSuccessfulCmd = make(chan string, opts.Jobs)
 	done := make(chan int)
 	var chExitStatus chan int
 	if opts.PropExitStatus {
@@ -1414,7 +1412,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 				// After sending the command, it's not guaranteed that the command is executed.
 				// so, a feedback is needed.
 				v := <-command.Executed
-				if opts.RecordSuccessfulCmd && v == 1 {
+				if v == 1 {
 					chSuccessfulCmd <- cmdStr
 				}
 
@@ -1424,9 +1422,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		wg.Wait()
 
 		close(chCmd)
-		if opts.RecordSuccessfulCmd {
-			close(chSuccessfulCmd)
-		}
+		close(chSuccessfulCmd)
 		if opts.PropExitStatus {
 			close(chExitStatus)
 		}

@@ -234,7 +234,25 @@ Preset variable (macro):
 		donePreprocessFiles := make(chan int)
 
 		// channel of command
-		chCmdStr := make(chan string, config.Jobs)
+		chCmdStr := make(chan string, 1)
+
+		// run
+		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4Output(opts, cancel, chCmdStr)
+
+		doneCheckSuccCmd := make(chan int)
+		var nSuccCmds int
+		go func() {
+			for c := range chSuccessfulCmd {
+				nSuccCmds++
+				if config.Continue {
+					bfhSuccCmds.WriteString(c + endMarkOfCMD)
+					bfhSuccCmds.Flush()
+				}
+			}
+			doneCheckSuccCmd <- 1
+		}()
+
+		// generate commands
 
 		anyCommands := false
 
@@ -296,6 +314,7 @@ Preset variable (macro):
 			records = make([]string, 0, n)
 			var cmdStr string
 			var runned bool
+			nJobs := (len(inputlines) + n - 1) / n
 			for _, record := range inputlines {
 				if record == "" {
 					continue
@@ -303,7 +322,7 @@ Preset variable (macro):
 				records = append(records, record)
 
 				if len(records) == n {
-					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
+					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-nSuccCmds)
 					checkError(errors.Wrap(err, "fill command"))
 					if config.Escape {
 						cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
@@ -333,7 +352,7 @@ Preset variable (macro):
 				}
 			}
 			if len(records) > 0 {
-				cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records})
+				cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-nSuccCmds)
 				checkError(errors.Wrap(err, "fill command"))
 				if config.Escape {
 					cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
@@ -364,9 +383,6 @@ Preset variable (macro):
 
 		// ---------------------------------------------------------------
 
-		// run
-		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4Output(opts, cancel, chCmdStr)
-
 		// read from chOutput and print
 		doneOutput := make(chan int)
 		go func() {
@@ -379,17 +395,6 @@ Preset variable (macro):
 			}
 			doneOutput <- 1
 		}()
-
-		doneSaveSuccCmd := make(chan int)
-		if config.Continue {
-			go func() {
-				for c := range chSuccessfulCmd {
-					bfhSuccCmds.WriteString(c + endMarkOfCMD)
-					bfhSuccCmds.Flush()
-				}
-				doneSaveSuccCmd <- 1
-			}()
-		}
 
 		var pToolExitStatus *int = nil
 		var doneExitStatus chan int
@@ -455,7 +460,7 @@ Preset variable (macro):
 			<-doneExitStatus
 		}
 		if config.Continue {
-			<-doneSaveSuccCmd
+			<-doneCheckSuccCmd
 		}
 
 		close(chExitSignalMonitor)
