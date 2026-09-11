@@ -23,6 +23,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -229,7 +230,8 @@ Preset variable (macro):
 
 		// ---------------------------------------------------------------
 
-		cancel := make(chan struct{})
+		runCtx, cancelRun := context.WithCancel(context.Background())
+		defer cancelRun()
 
 		donePreprocessFiles := make(chan int)
 
@@ -237,7 +239,7 @@ Preset variable (macro):
 		chCmdStr := make(chan string, 1)
 
 		// run
-		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4Output(opts, cancel, chCmdStr)
+		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4OutputContext(opts, runCtx, cancelRun, chCmdStr)
 
 		doneCheckSuccCmd := make(chan int)
 		var nSuccCmds int
@@ -274,7 +276,7 @@ Preset variable (macro):
 
 			for scanner.Scan() {
 				select {
-				case <-cancel:
+				case <-runCtx.Done():
 					if config.Verbose {
 						log.Warningf("cancel reading file: %s", file)
 					}
@@ -307,6 +309,19 @@ Preset variable (macro):
 
 		// read data and generate command
 		go func() {
+			defer close(chCmdStr)
+			defer close(donePreprocessFiles)
+
+			sendCommand := func(cmdStr string) bool {
+				select {
+				case chCmdStr <- cmdStr:
+					anyCommands = true
+					return true
+				case <-runCtx.Done():
+					return false
+				}
+			}
+
 			n := config.NRecords
 			var id uint64 = 1
 
@@ -338,12 +353,14 @@ Preset variable (macro):
 								// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 								// bfhSuccCmds.Flush()
 							} else {
-								chCmdStr <- cmdStr
-								anyCommands = true
+								if !sendCommand(cmdStr) {
+									return
+								}
 							}
 						} else {
-							chCmdStr <- cmdStr
-							anyCommands = true
+							if !sendCommand(cmdStr) {
+								return
+							}
 						}
 
 						id++
@@ -364,21 +381,17 @@ Preset variable (macro):
 							// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 							// bfhSuccCmds.Flush()
 						} else {
-							chCmdStr <- cmdStr
-							anyCommands = true
+							if !sendCommand(cmdStr) {
+								return
+							}
 						}
 					} else {
-						chCmdStr <- cmdStr
-						anyCommands = true
+						if !sendCommand(cmdStr) {
+							return
+						}
 					}
 				}
 			}
-
-			close(chCmdStr)
-			// if Verbose {
-			// 	log.Infof("finish reading input data")
-			// }
-			donePreprocessFiles <- 1
 		}()
 
 		// ---------------------------------------------------------------
@@ -432,19 +445,23 @@ Preset variable (macro):
 		cleanupDone := make(chan int)
 		signal.Notify(signalChan, os.Interrupt)
 		go func() {
-			select {
-			case <-signalChan:
-				log.Criticalf("received an interrupt, stopping unfinished commands...")
+			interrupted := false
+			for {
 				select {
-				case <-cancel: // already closed
-				default:
-					close(cancel)
+				case <-signalChan:
+					if interrupted {
+						log.Criticalf("received another interrupt, killing unfinished commands...")
+						opts.ForceStop()
+						continue
+					}
+					interrupted = true
+					log.Criticalf("received an interrupt, stopping unfinished commands...")
+					cancelRun()
+				case <-chExitSignalMonitor:
+					signal.Stop(signalChan)
+					cleanupDone <- 1
+					return
 				}
-				cleanupDone <- 1
-				return
-			case <-chExitSignalMonitor:
-				cleanupDone <- 1
-				return
 			}
 		}()
 

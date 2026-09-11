@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 // Copyright © 2017-2023 Wei Shen <shenwei356@gmail.com>
@@ -323,6 +324,14 @@ func getCommand(ctx context.Context, qcmd string) (command *exec.Cmd) {
 		HideWindow:    false,
 		CmdLine:       fmt.Sprintf(` /s /c "%s"`, qcmd),
 		CreationFlags: 0,
+	}
+	if ctx != nil {
+		command.Cancel = func() error {
+			if command.Process == nil {
+				return os.ErrProcessDone
+			}
+			return killProcessTree(command.Process.Pid)
+		}
 	}
 	return command
 }
@@ -814,8 +823,8 @@ const (
 	STILL_ACTIVE = 259
 )
 
-func killProcess(processRecord ProcessRecord) (err error) {
-	pidStr := strconv.Itoa(processRecord.pid)
+func killProcessTree(pid int) (err error) {
+	pidStr := strconv.Itoa(pid)
 	if Verbose {
 		Log.Infof("taskkill /t /f /pid %s", pidStr)
 	}
@@ -829,12 +838,16 @@ func killProcess(processRecord ProcessRecord) (err error) {
 	return err
 }
 
+func killProcess(processRecord ProcessRecord) error {
+	return killProcessTree(processRecord.pid)
+}
+
 func signalProcess(processRecord ProcessRecord, signalNum int) (err error) {
 	switch signalNum {
 	case CTRL_C_SIGNAL, CTRL_BREAK_SIGNAL:
 		err = _signalProcess(processRecord, signalNum)
 	case KILL_SIGNAL:
-		err = pollKillProcess(processRecord)
+		err = killProcess(processRecord)
 	default:
 		err = errors.New("Unexpected signalNum")
 	}

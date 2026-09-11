@@ -64,7 +64,7 @@ type Command struct {
 	ID  uint64 // ID
 	Cmd string // command
 
-	Cancel    chan struct{}      // channel for close
+	Cancel    <-chan struct{}    // channel for close
 	Timeout   time.Duration      // time out
 	ctx       context.Context    // context.WithTimeout
 	ctxCancel context.CancelFunc // cancel func for timetout
@@ -85,7 +85,7 @@ type Command struct {
 }
 
 // NewCommand create a Command
-func NewCommand(id uint64, cmdStr string, cancel chan struct{}, timeout time.Duration) *Command {
+func NewCommand(id uint64, cmdStr string, cancel <-chan struct{}, timeout time.Duration) *Command {
 	command := &Command{
 		ID:      id,
 		Cmd:     strings.TrimLeft(cmdStr, " \t\r\n"),
@@ -282,7 +282,7 @@ func lexEncode(n uint64, topLevel TopLevelEnum) string {
 	if nlen > 1 {
 		// include non-numeric part of lex prefix
 		// to allow proper sorting, this char must come after numerics in the ascii table
-		encoded = fmt.Sprintf("_")
+		encoded = "_"
 		// then include recursive part
 		encoded += lexEncode(nlen, NotTopLevel)
 		// conditionally include lex separator
@@ -559,7 +559,7 @@ func checkChildProcess(pidRecordsLock *sync.Mutex, childCheckProcess *psutil.Pro
 	return
 }
 
-// get process tree in bottom up order
+// get a process record when the process belongs to this rush invocation
 func getProcessTreeRecursive(
 	pidRecordsLock *sync.Mutex,
 	childCheckProcess *psutil.Process,
@@ -582,31 +582,6 @@ func getProcessTreeRecursive(
 			}
 			if processHandle != INVALID_HANDLE {
 				if considerChild {
-					grandChildren, err := childCheckProcess.Children()
-					if err != nil {
-						if err == psutil.ErrorNoChildren {
-							// ignore this error
-							err = nil
-						} else {
-							if Verbose {
-								Log.Error(err)
-							}
-						}
-					} else {
-						if grandChildren != nil {
-							for _, grandChildProcess := range grandChildren {
-								subProcessRecords := getProcessTreeRecursive(
-									pidRecordsLock,
-									grandChildProcess,
-									noStopExes,
-									noKillExes,
-									pidsVisited)
-								for _, subProcessRecord := range subProcessRecords {
-									processRecords = append(processRecords, subProcessRecord)
-								}
-							}
-						}
-					}
 					var processRecord = ProcessRecord{
 						processHandle: processHandle, pid: int(childCheckProcess.Pid), signalsToSend: signalsToSend}
 					processRecords = append(processRecords, processRecord)
@@ -731,7 +706,7 @@ func anyRemainingChildren(processRecords []ProcessRecord) (anyRemaining bool) {
 	return anyRemaining
 }
 
-func pollRemainingChildren(processRecords []ProcessRecord, cleanupTime time.Duration) (anyRemaining bool) {
+func pollRemainingChildren(processRecords []ProcessRecord, cleanupTime time.Duration, forceStop <-chan struct{}) (anyRemaining bool) {
 	anyRemaining = false
 	startTime := time.Now()
 	sleepTime := 250 * time.Millisecond
@@ -739,7 +714,11 @@ func pollRemainingChildren(processRecords []ProcessRecord, cleanupTime time.Dura
 		continuePolling := false
 		anyRemaining = anyRemainingChildren(processRecords)
 		if anyRemaining && cleanupTime > 0 {
-			time.Sleep(sleepTime)
+			select {
+			case <-time.After(sleepTime):
+			case <-forceStop:
+				return true
+			}
 			elapsedTime := time.Since(startTime)
 			if elapsedTime < cleanupTime {
 				// exponential back off with limit:
@@ -760,36 +739,8 @@ func pollRemainingChildren(processRecords []ProcessRecord, cleanupTime time.Dura
 	return anyRemaining
 }
 
-func pollKillProcess(processRecord ProcessRecord) (err error) {
-	if doesProcessExist(processRecord.processHandle) {
-		attempts := 0
-		for {
-			continuePolling := false
-			err = killProcess(processRecord)
-			if doesProcessExist(processRecord.processHandle) {
-				if attempts < 30 {
-					continuePolling = true
-				} else {
-					// timed out
-					err = errors.New(
-						fmt.Sprintf("Timed out trying to kill child process, pid %d", processRecord.pid))
-				}
-			}
-			if continuePolling {
-				// don't use exponential back off here
-				// since want to fail out after fixed number of attempts
-				time.Sleep(250 * time.Millisecond)
-				attempts += 1
-			} else {
-				break
-			}
-		}
-	}
-	return err
-}
-
 // ensure our child processes are stopped
-func stopChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillExes []string, cleanupTime time.Duration) (err error) {
+func stopChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillExes []string, cleanupTime time.Duration, forceStop <-chan struct{}) (err error) {
 	err = nil            // first assume no error
 	anyRemaining := true // first assume some children
 	totalNumSignaled := 0
@@ -800,7 +751,7 @@ func stopChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillE
 		numSignaled := signalChildProcesses(processRecords, CTRL_C_SIGNAL)
 		if numSignaled > 0 {
 			totalNumSignaled += numSignaled
-			anyRemaining = pollRemainingChildren(processRecords, cleanupTime)
+			anyRemaining = pollRemainingChildren(processRecords, cleanupTime, forceStop)
 		} else {
 			anyRemaining = true
 		}
@@ -808,7 +759,7 @@ func stopChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillE
 			numSignaled = signalChildProcesses(processRecords, CTRL_BREAK_SIGNAL)
 			if numSignaled > 0 {
 				totalNumSignaled += numSignaled
-				anyRemaining = pollRemainingChildren(processRecords, cleanupTime)
+				anyRemaining = pollRemainingChildren(processRecords, cleanupTime, forceStop)
 			} else {
 				anyRemaining = true
 			}
@@ -817,7 +768,7 @@ func stopChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillE
 				totalNumSignaled += numSignaled
 			}
 		}
-		anyRemaining = pollRemainingChildren(processRecords, 0) // wait zero time, since already waited above
+		anyRemaining = pollRemainingChildren(processRecords, 0, forceStop) // wait zero time, since already waited above
 		// release process handles only after descending into all processes,
 		// to ensure pids do not get reused while descending
 		releaseProcesses(pidRecordsLock)
@@ -834,7 +785,7 @@ func stopChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillE
 func releaseProcessByPid(pid int) {
 	// no pidRecordsLock here, rely on caller to do it
 	processRecord, keyPresent := pidRecords[pid]
-	if !keyPresent {
+	if keyPresent {
 		delete(pidRecords, processRecord.pid)
 		releaseProcessByHandle(processRecord.processHandle)
 	}
@@ -870,8 +821,6 @@ func containsMarker(env string) bool {
 	return strings.Contains(match, childMarkerValue)
 }
 
-var stopOnce sync.Once
-
 // run a command and pass output to c.reader.
 // Note that output returns only after finishing run.
 // This function is mainly borrowed from https://github.com/brentp/gargs .
@@ -880,7 +829,7 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 	chCancelMonitor := make(chan struct{})
 	defer func() {
 		close(chCancelMonitor)
-		c.Duration = time.Now().Sub(t)
+		c.Duration = time.Since(t)
 
 		close(c.Executed)
 	}()
@@ -895,7 +844,7 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 		c.ctx, c.ctxCancel = context.WithTimeout(context.Background(), c.Timeout)
 		command = getCommand(c.ctx, qcmd)
 	} else {
-		command = getCommand(nil, qcmd)
+		command = getCommand(context.TODO(), qcmd)
 	}
 
 	// mark child processes with our pid,
@@ -948,19 +897,8 @@ func (c *Command) run(opts *Options, tryNumber int) error {
 			if Verbose {
 				Log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
 			}
+			opts.stopChildren()
 			chErr <- ErrCancelled
-			// ensure we only initiate the stop attempt once,
-			// from all our command threads
-			stopOnce.Do(func() {
-				err = stopChildProcesses(&opts.PidRecordsLock, opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
-				if err != nil {
-					if Verbose {
-						Log.Error(err)
-					}
-					os.Exit(1)
-				}
-				os.Exit(1)
-			})
 		case <-chCancelMonitor:
 			// default:  // must not use default, if you must use, use for loop
 		}
@@ -1125,16 +1063,51 @@ type Options struct {
 	PropExitStatus      bool          // propagate child exit status
 	RecordSuccessfulCmd bool          // send successful command to channel
 	Verbose             bool
+	stopOnce            sync.Once
+	stopOnErrorOnce     sync.Once
+	forceStopInit       sync.Once
+	forceStopOnce       sync.Once
+	forceStop           chan struct{}
 }
 
-// Run4Output runs commands in parallel from channel chCmdStr,
-// and returns an output text channel,
-// and a done channel to ensure safe exit.
+func (opts *Options) forceStopChannel() <-chan struct{} {
+	opts.forceStopInit.Do(func() {
+		opts.forceStop = make(chan struct{})
+	})
+	return opts.forceStop
+}
+
+// ForceStop skips any remaining graceful cleanup delay and kills child processes.
+func (opts *Options) ForceStop() {
+	opts.forceStopOnce.Do(func() {
+		opts.forceStopChannel()
+		close(opts.forceStop)
+	})
+}
+
+func (opts *Options) stopChildren() {
+	opts.stopOnce.Do(func() {
+		err := stopChildProcesses(&opts.PidRecordsLock, opts.NoStopExes, opts.NoKillExes, opts.CleanupTime, opts.forceStopChannel())
+		if err != nil && Verbose {
+			Log.Error(err)
+		}
+	})
+}
+
+// Run4Output runs commands in parallel from channel chCmdStr.
 func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan string, chan string, chan int, chan int) {
+	runCtx, cancelRun := contextFromCancel(cancel)
+	chOut, chSuccessfulCmd, done, chExitStatus := Run4OutputContext(opts, runCtx, cancelRun, chCmdStr)
+	return chOut, chSuccessfulCmd, cancelAfterDone(done, cancelRun), chExitStatus
+}
+
+// Run4OutputContext runs commands in parallel and allows the caller and workers
+// to share the same cancellation signal.
+func Run4OutputContext(opts *Options, runCtx context.Context, cancelRun context.CancelFunc, chCmdStr chan string) (chan string, chan string, chan int, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
-	chCmd, chSuccessfulCmd, doneChCmd, chExitStatus := Run(opts, cancel, chCmdStr)
+	chCmd, chSuccessfulCmd, doneChCmd, chExitStatus := runContext(opts, runCtx, cancelRun, chCmdStr)
 	chOut := make(chan string, opts.Jobs)
 	done := make(chan int)
 
@@ -1147,7 +1120,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 		RECEIVECMD:
 			for c := range chCmd {
 				select {
-				case <-cancel:
+				case <-runCtx.Done():
 					break RECEIVECMD
 				default: // needed
 				}
@@ -1193,7 +1166,7 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 		RECEIVECMD2:
 			for c = range chCmd {
 				select {
-				case <-cancel:
+				case <-runCtx.Done():
 					break RECEIVECMD2
 				default: // needed
 				}
@@ -1263,6 +1236,28 @@ func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan
 	return chOut, chSuccessfulCmd, done, chExitStatus
 }
 
+func contextFromCancel(cancel <-chan struct{}) (context.Context, context.CancelFunc) {
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-cancel:
+			cancelRun()
+		case <-runCtx.Done():
+		}
+	}()
+	return runCtx, cancelRun
+}
+
+func cancelAfterDone(done <-chan int, cancelRun context.CancelFunc) chan int {
+	doneAndCancelled := make(chan int)
+	go func() {
+		<-done
+		cancelRun()
+		doneAndCancelled <- 1
+	}()
+	return doneAndCancelled
+}
+
 // write strings and report done
 func combineWorker(input <-chan string, output chan<- string, wg *sync.WaitGroup) {
 	defer wg.Done()
@@ -1284,10 +1279,14 @@ func combine(inputs []<-chan string, output chan<- string) {
 	}()
 }
 
-// Run runs commands in parallel from channel chCmdStr，
-// and returns a Command channel,
-// and a done channel to ensure safe exit.
+// Run runs commands in parallel from channel chCmdStr.
 func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Command, chan string, chan int, chan int) {
+	runCtx, cancelRun := contextFromCancel(cancel)
+	chCmd, chSuccessfulCmd, done, chExitStatus := runContext(opts, runCtx, cancelRun, chCmdStr)
+	return chCmd, chSuccessfulCmd, cancelAfterDone(done, cancelRun), chExitStatus
+}
+
+func runContext(opts *Options, runCtx context.Context, cancelRun context.CancelFunc, chCmdStr chan string) (chan *Command, chan string, chan int, chan int) {
 	if opts.Verbose {
 		Verbose = true
 	}
@@ -1305,11 +1304,10 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 		var wg sync.WaitGroup
 		tokens := make(chan int, opts.Jobs)
 		var id uint64 = 1
-		var stop bool
 	RECEIVECMD:
 		for cmdStr := range chCmdStr {
 			select {
-			case <-cancel:
+			case <-runCtx.Done():
 				if Verbose {
 					Log.Debugf("cancel receiving commands")
 				}
@@ -1317,12 +1315,18 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 			default: // needed
 			}
 
-			if stop {
-				break
+			select {
+			case tokens <- 1:
+			case <-runCtx.Done():
+				break RECEIVECMD
 			}
-
+			select {
+			case <-runCtx.Done():
+				<-tokens
+				break RECEIVECMD
+			default:
+			}
 			wg.Add(1)
-			tokens <- 1
 
 			go func(id uint64, cmdStr string) {
 				defer func() {
@@ -1330,7 +1334,7 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 					<-tokens
 				}()
 
-				command := NewCommand(id, cmdStr, cancel, opts.Timeout)
+				command := NewCommand(id, cmdStr, runCtx.Done(), opts.Timeout)
 
 				if opts.DryRun {
 					command.dryrun = true
@@ -1357,26 +1361,11 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 						}
 
 						if opts.StopOnErr {
-							select {
-							case <-cancel: // already closed
-							default:
-								// ensure we only initiate the stop attempt once,
-								// from all our command threads
-								stopOnce.Do(func() {
-									if opts.StopOnErr {
-										Log.Error("stop on first error")
-									}
-									err = stopChildProcesses(&opts.PidRecordsLock, opts.NoStopExes, opts.NoKillExes, opts.CleanupTime)
-									if err != nil {
-										if Verbose {
-											Log.Error(err)
-										}
-										os.Exit(1)
-									}
-								})
-							}
-
-							stop = true
+							opts.stopOnErrorOnce.Do(func() {
+								Log.Error("stop on first error")
+								cancelRun()
+							})
+							opts.stopChildren()
 							return
 						}
 						if chances > 0 {
@@ -1418,6 +1407,9 @@ func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Comma
 
 			}(id, cmdStr)
 			id++
+		}
+		if runCtx.Err() != nil {
+			opts.stopChildren()
 		}
 		wg.Wait()
 

@@ -30,7 +30,7 @@ import (
 )
 
 // VERSION of this package
-const VERSION = "0.9.0"
+const VERSION = "0.10.0"
 
 func isStdin(file string) bool {
 	return file == "-"
@@ -104,6 +104,9 @@ func readSuccCmds(file string) map[string]struct{} {
 			continue
 		}
 		cmds[record] = struct{}{}
+	}
+	if err := scanner.Err(); err != nil {
+		checkError(fmt.Errorf("failed to read file %s: %s", file, err))
 	}
 	return cmds
 }
