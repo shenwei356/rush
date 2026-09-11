@@ -194,7 +194,7 @@ Preset variable (macro):
 			ETA:                 config.ETA,
 			KeepOrder:           config.KeepOrder,
 			Retries:             config.Retries,
-			RetryInterval:       time.Duration(config.RetryInterval) * time.Second,
+			RetryInterval:       time.Duration(config.RetryInterval * float64(time.Second)),
 			OutFileHandle:       outfh,
 			ErrFileHandle:       errfh,
 			ImmediateOutput:     config.ImmediateOutput,
@@ -526,7 +526,7 @@ func init() {
 	RootCmd.Flags().StringP("field-delimiter", "d", `\s+`, "field delimiter in records, support regular expression")
 
 	RootCmd.Flags().IntP("retries", "r", 0, "maximum retries (default 0)")
-	RootCmd.Flags().IntP("retry-interval", "", 0, "retry interval (unit: second) (default 0)")
+	RootCmd.Flags().Float64P("retry-interval", "", 0, "retry interval (unit: second, supports fractions like 0.5) (default 0)")
 	RootCmd.Flags().BoolP("immediate-output", "I", false, "print output immediately and interleaved, to aid debugging")
 	RootCmd.Flags().BoolP("print-retry-output", "", true, "print output from retry commands")
 	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: seconds, 0 for no timeout) (default 0)")
@@ -662,7 +662,7 @@ type Config struct {
 	reFieldDelimiter     *regexp.Regexp
 
 	Retries          int
-	RetryInterval    int
+	RetryInterval    float64
 	ImmediateOutput  bool
 	PrintRetryOutput bool
 	Timeout          int
@@ -730,7 +730,7 @@ func getConfigs(cmd *cobra.Command) Config {
 		FieldDelimiter:       getFlagString(cmd, "field-delimiter"),
 
 		Retries:          getFlagNonNegativeInt(cmd, "retries"),
-		RetryInterval:    getFlagNonNegativeInt(cmd, "retry-interval"),
+		RetryInterval:    getFlagNonNegativeFloat64(cmd, "retry-interval"),
 		ImmediateOutput:  getFlagBool(cmd, "immediate-output"),
 		PrintRetryOutput: getFlagBool(cmd, "print-retry-output"),
 		Timeout:          getFlagNonNegativeInt(cmd, "timeout"),

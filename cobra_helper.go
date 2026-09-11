@@ -91,7 +91,7 @@ func getFlagNonNegativeFloat64(cmd *cobra.Command, flag string) float64 {
 	value, err := cmd.Flags().GetFloat64(flag)
 	checkError(err)
 	if value < 0 {
-		checkError(fmt.Errorf("value of flag --%s should be greater than or equal to ", flag))
+		checkError(fmt.Errorf("value of flag --%s should be greater than or equal to 0", flag))
 	}
 	return value
 }

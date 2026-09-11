@@ -342,7 +342,7 @@ Flags:
   -D, --record-delimiter string   record delimiter (default is "\n") (default "\n")
   -J, --records-join-sep string   record separator for joining multi-records (default is "\n") (default "\n")
   -r, --retries int               maximum retries (default 0)
-      --retry-interval int        retry interval (unit: second) (default 0)
+      --retry-interval float      retry interval (unit: second, supports fractions like 0.5) (default 0)
   -e, --stop-on-error             stop child processes on first error (not perfect, you may stop it by
                                   typing ctrl-c or closing terminal)
   -C, --succ-cmd-file string      file for saving successful commands (default "successful_cmds.rush")
