@@ -1,7 +1,7 @@
 - rush v0.10.0
-	- Make `Ctrl+C`, `SIGTERM`, timeout, and stop-on-error cancellation deterministic; documented exit statuses are 130, 143, and 124 respectively.
-	- Keep `--keep-order` output ordered without reducing command concurrency.
-	- On Windows, use a directed `Ctrl+Break` for child command groups before forced cleanup; deliberately detached processes remain outside the cleanup guarantee.
+    - Make `Ctrl+C`, `SIGTERM`, timeout, and stop-on-error cancellation deterministic; documented exit statuses are 130, 143, and 124 respectively.
+    - Keep `--keep-order` output ordered without reducing command concurrency.
+    - On Windows, use a directed `Ctrl+Break` for child command groups before forced cleanup; deliberately detached processes remain outside the cleanup guarantee.
     - Fix hangs and high CPU usage while stopping child processes after `-e/--stop-on-error` or `Ctrl+C`. [#76](https://github.com/shenwei356/rush/issues/76)
     - A second `Ctrl+C` skips the remaining graceful cleanup delay and immediately kills unfinished processes.
     - Ensure that `-t/--timeout` terminates the timed-out command and its child-process tree on Unix and Windows.
