@@ -392,7 +392,7 @@ Flags:
         python: can't open file 'unexisted_script.py': [Errno 2] No such file or directory
         [ERRO] wait command: python unexisted_script.py: exit status 2
 
-1. Input containing `{}` (since v0.7.0)
+1. Input containing `{}` (since v0.10.0)
 
         $ echo "a attr{href}"="h4 text{}" | rush -T b -k -D "=" 'echo "{}"'
         a attr{href}
@@ -546,17 +546,17 @@ Flags:
     Press `Ctrl-C` again to skip the remaining cleanup delay and immediately kill unfinished processes.
     Commands that have not started are discarded after the interrupt and are not executed.
 
-        $ seq 1 20 | rush 'sleep 1; echo {}'
-        ^C[CRIT] received an interrupt, stopping unfinished commands...
-        [ERRO] wait cmd #7: sleep 1; echo 7: signal: interrupt
-        [ERRO] wait cmd #5: sleep 1; echo 5: signal: killed
-        [ERRO] wait cmd #6: sleep 1; echo 6: signal: killed
-        [ERRO] wait cmd #8: sleep 1; echo 8: signal: killed
-        [ERRO] wait cmd #9: sleep 1; echo 9: signal: killed
-        1
-        3
+        $ seq 1 20 | rush -j 4 'sleep 1; echo {}'
         4
+        1
         2
+        3
+        ^C23:16:30.725 [CRIT] received an interrupt, stopping unfinished commands...
+        23:16:30.741 [ERRO] cancelled
+        23:16:30.741 [ERRO] cancelled
+        23:16:30.741 [ERRO] cancelled
+        23:16:30.741 [ERRO] cancelled
+
 
 1. Continue/resume jobs (`-c`). When some jobs failed (by execution failure, timeout,
     or cancelling by user with `Ctrl + C`),

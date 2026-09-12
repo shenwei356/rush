@@ -630,6 +630,7 @@ func init() {
 
 	RootCmd.Flags().BoolP("escape", "q", false, `escape special symbols like $ which you can customize by flag -Q/--escape-symbols`)
 	RootCmd.Flags().StringP("escape-symbols", "Q", "$#&`", "symbols to escape")
+	// RootCmd.Flags().BoolP("escape-curly-brackets", "B", false, `escape curly brackets "{}" in the, e.g., "text{}" or "attr{href}"`)
 
 	RootCmd.Example = `  1. simple run, quoting is not necessary
       $ seq 1 10 | rush echo {}
@@ -762,6 +763,8 @@ type Config struct {
 
 	Escape        bool
 	EscapeSymbols string
+
+	EscapeCurlyBrackets bool
 }
 
 // var=value
@@ -830,5 +833,9 @@ func getConfigs(cmd *cobra.Command) Config {
 
 		Escape:        getFlagBool(cmd, "escape"),
 		EscapeSymbols: getFlagString(cmd, "escape-symbols"),
+
+		EscapeCurlyBrackets: true, // getFlagBool(cmd, "escape-curly-brackets"),
 	}
 }
+
+var reCurlyBrackets = regexp.MustCompile(`\{([^\{\}]*?)\}`)

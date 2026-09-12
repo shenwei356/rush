@@ -8,6 +8,7 @@
     - Correctly release cached process records and Windows process handles after cleanup.
     - Use direct process inspection and native system calls instead of external `ps`, `kill`, `sh`, `xargs`, and `pgrep` commands to find and stop child processes on Unix. Windows continues to terminate complete process trees with `taskkill /T /F`.
     - Flag `--retry-interval` supports fractions like 0.5. [#21](https://github.com/shenwei356/rush/issues/21)
+    - Fix handling input with curly brackets. [#61](https://github.com/shenwei356/rush/issues/61)
 - rush v0.9.0
     - Add a new replacement string `{?}`, a value computed as `$cpus / $jobs`, 
       which can be used as the number of threads for each command. 

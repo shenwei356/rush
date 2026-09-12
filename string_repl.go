@@ -71,6 +71,11 @@ func _fillCommand(config Config, command string, chunk Chunk, nRemainingJobs int
 		return "", nil
 	}
 
+	// escape curly brackets "{}" in the, e.g., "text{}" or "attr{href}"
+	if config.EscapeCurlyBrackets {
+		fieldsStr = reCurlyBrackets.ReplaceAllString(fieldsStr, `{{$1}}`)
+	}
+
 	var fields []string
 
 	var chars, char, target string
