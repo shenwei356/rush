@@ -890,12 +890,13 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 			parts = append(parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: true})
 			return finish(true, command.exitStatus, nil)
 		}
-		Log.Error(err)
 		parts = append(parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: opts.PrintRetryOutput || attempt == opts.Retries})
 		if isOutputFailure(err) {
+			Log.Error(err)
 			return finish(false, 1, err)
 		}
 		if opts.StopOnErr && !errors.Is(err, ErrCancelled) {
+			Log.Error(err)
 			status := command.exitStatus
 			if status == 0 {
 				status = 1
@@ -905,8 +906,10 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 			return finish(false, status, nil)
 		}
 		if errors.Is(err, ErrCancelled) || attempt == opts.Retries {
+			Log.Error(err)
 			return finish(false, command.exitStatus, nil)
 		}
+		Log.Warning(err)
 		timer := time.NewTimer(opts.RetryInterval)
 		select {
 		case <-timer.C:
