@@ -1,403 +1,425 @@
-// Copyright © 2017-2023 Wei Shen <shenwei356@gmail.com>
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-// THE SOFTWARE.
-
 package process
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/cznic/sortutil"
-	"github.com/pkg/errors"
 	pb "github.com/schollz/progressbar/v3"
 	"github.com/shenwei356/go-logging"
-	psutil "github.com/shirou/gopsutil/process"
+	"github.com/shenwei356/rush/internal/runstate"
 )
 
-// Log is *logging.Logger
 var Log *logging.Logger
-
-// pid_numSecondsSinceEpoch
-var ChildMarker string = strconv.Itoa(os.Getpid()) + "_" + strconv.FormatInt(time.Now().Unix(), 16)
+var Verbose bool
+var TmpOutputDataBuffer = 1 << 20
+var OutputChunkSize = 16 << 10
+var tmpfilePrefix = fmt.Sprintf("rush.%d.", os.Getpid())
+var createSpillFile = func() (*os.File, error) { return os.CreateTemp("", tmpfilePrefix) }
+var flushSpillFile = func(w *bufio.Writer) error { return w.Flush() }
+var seekSpillFile = func(f *os.File, offset int64, whence int) (int64, error) {
+	return f.Seek(offset, whence)
+}
+var closeSpillFile = func(f *os.File) error { return f.Close() }
+var removeSpillFile = os.Remove
+var writeSpillFile = func(w *bufio.Writer, p []byte) (int, error) { return w.Write(p) }
+var wrapSpillReader = func(r io.Reader) io.Reader { return r }
 
 func init() {
 	if Log == nil {
-		logFormat := logging.MustStringFormatter(`%{color}[%{level:.4s}]%{color:reset} %{message}`)
-		backend := logging.NewLogBackend(os.Stderr, "", 0)
-		backendFormatter := logging.NewBackendFormatter(backend, logFormat)
-		logging.SetBackend(backendFormatter)
+		format := logging.MustStringFormatter(`%{color}[%{level:.4s}]%{color:reset} %{message}`)
+		logging.SetBackend(logging.NewBackendFormatter(logging.NewLogBackend(os.Stderr, "", 0), format))
 		Log = logging.MustGetLogger("process")
 	}
 }
 
-// Command is the Command struct
+var ErrTimeout = errors.New("time out")
+var ErrCancelled = errors.New("cancelled")
+
 type Command struct {
-	ID  uint64 // ID
-	Cmd string // command
-
-	Cancel    <-chan struct{}    // channel for close
-	Timeout   time.Duration      // time out
-	ctx       context.Context    // context.WithTimeout
-	ctxCancel context.CancelFunc // cancel func for timetout
-
-	Ch               chan string   // channel for stdout
-	reader           *bufio.Reader // reader for stdout
-	tmpfile          string        // tmpfile for stdout
-	tmpfh            *os.File      // file handler for tmpfile
-	finishSendOutput bool          // a flag of whether finished sending output to Ch
-
-	Err      error         // Error
-	Duration time.Duration // runtime
-
-	dryrun     bool
-	exitStatus int
-
-	Executed chan int // for checking if the command has been executed
+	ID               uint64
+	Cmd              string
+	Cancel           <-chan struct{}
+	Timeout          time.Duration
+	ctx              context.Context
+	ctxCancel        context.CancelFunc
+	Ch               chan string
+	reader           *bufio.Reader
+	tmpfile          string
+	tmpfh            *os.File
+	finishSendOutput bool
+	outputDone       <-chan error
+	outputErr        error
+	Err              error
+	Duration         time.Duration
+	dryrun           bool
+	exitStatus       int
+	Executed         chan int
+	controller       processController
 }
 
-// NewCommand create a Command
 func NewCommand(id uint64, cmdStr string, cancel <-chan struct{}, timeout time.Duration) *Command {
-	command := &Command{
-		ID:      id,
-		Cmd:     strings.TrimLeft(cmdStr, " \t\r\n"),
-		Cancel:  cancel,
-		Timeout: timeout,
-
-		Executed: make(chan int, 2),
-	}
-	return command
+	return &Command{ID: id, Cmd: strings.TrimLeft(cmdStr, " \t\r\n"), Cancel: cancel, Timeout: timeout, Executed: make(chan int, 2)}
 }
+func (c *Command) String() string { return fmt.Sprintf("cmd #%d: %s", c.ID, c.Cmd) }
 
-func (c *Command) String() string {
-	return fmt.Sprintf("cmd #%d: %s", c.ID, c.Cmd)
-}
-
-// Verbose decides whether print extra information
-var Verbose bool
-
-var tmpfilePrefix = fmt.Sprintf("rush.%d.", os.Getpid())
-
-// TmpOutputDataBuffer is buffer size for output of a command before saving to tmpfile,
-// default 1M.
-var TmpOutputDataBuffer = 1048576 // 1M
-
-// OutputChunkSize is buffer size of output string chunk sent to channel, default 16K.
-var OutputChunkSize = 16384 // 16K
-
-// Run runs a command and send output to command.Ch in background.
 func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
-	// create a return chan here; we will set the c.Ch in the parent
 	ch := make(chan string, 1)
-
+	outputDone := make(chan error, 1)
+	c.outputDone = outputDone
+	completeOutput := func(err error) {
+		outputDone <- err
+		close(outputDone)
+	}
 	if c.dryrun {
 		ch <- c.Cmd + "\n"
 		close(ch)
-		c.finishSendOutput = true
+		completeOutput(nil)
+		c.Executed <- 1
 		close(c.Executed)
 		return ch, nil
 	}
-
-	c.Err = c.run(opts, tryNumber)
-
-	// don't return here, keep going so we can display
-	// the output from commands that error
-	var readErr error = nil
-
+	started := time.Now()
+	defer func() { c.Duration = time.Since(started) }()
 	if Verbose {
-		if c.exitStatus == 0 {
-			Log.Infof("finish cmd #%d in %s: %s: exit status %d", c.ID, c.Duration, c.Cmd, c.exitStatus)
-		} else {
-			// exitStatus will appear in wait cmd message
-			Log.Infof("finish cmd #%d in %s: %s", c.ID, c.Duration, c.Cmd)
-		}
+		Log.Infof("start cmd #%d: %s", c.ID, c.Cmd)
+		defer Log.Infof("finish cmd #%d: %s", c.ID, c.Cmd)
 	}
-
-	go func() {
-		if opts.ImmediateOutput {
+	controller := c.controller
+	owned := false
+	if controller == nil {
+		var err error
+		controller, err = makeProcessController(opts)
+		if err != nil {
 			close(ch)
-			c.finishSendOutput = true
-		} else {
-			if c.tmpfile != "" { // data saved in tempfile
-				c.reader = bufio.NewReader(c.tmpfh)
-			}
-
-			buf := make([]byte, OutputChunkSize)
-			var n int
-			var i int
-			var b bytes.Buffer
-			var bb []byte
-			var existedN int
-			// var N uint64
-			for {
-				if c.reader != nil {
-					n, readErr = c.reader.Read(buf)
-				} else {
-					n = 0
-					readErr = io.EOF
-				}
-
-				existedN = b.Len()
-				b.Write(buf[0:n])
-
-				if readErr != nil {
-					if readErr == io.EOF {
-						if b.Len() > 0 {
-							// if Verbose {
-							// 	N += uint64(b.Len())
-							// }
-							ch <- b.String() // string(buf[0:n])
-						}
-						b.Reset()
-						readErr = nil
-					}
-					break
-				}
-
-				bb = b.Bytes()
-				i = bytes.LastIndexByte(bb, '\n')
-				if i < 0 {
-					continue
-				}
-
-				// if Verbose {
-				// 	N += uint64(len(bb[0 : i+1]))
-				// }
-				ch <- string(bb[0 : i+1]) // string(buf[0:n])
-
-				b.Reset()
-				if i-existedN+1 < n {
-					// ------    ======i========n
-					// existed   buf
-					//   5          4      6
-					b.Write(buf[i-existedN+1 : n])
-				}
-				// N += n
-			}
-
-			// if Verbose {
-			// 	Log.Debugf("cmd #%d sent %d bytes\n", c.ID, N)
-			// }
-
-			// if Verbose {
-			// 	Log.Infof("finish reading data from: %s", c.Cmd)
-			// }
-
-			close(ch)
-			c.finishSendOutput = true
+			completeOutput(nil)
+			return ch, err
 		}
-	}()
-	if c.Err != nil {
-		return ch, c.Err
+		owned = true
+		defer controller.Close()
+	}
+	command := getCommand(context.Background(), c.Cmd)
+	command.Env = append(os.Environ(), "RUSH_CHILD_GROUP=[rush]")
+	spill := newSpillWriter(TmpOutputDataBuffer)
+	var stdout, stderr *lockedWriter
+	if opts.ImmediateOutput {
+		stdout = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.OutFileHandle}
+		stderr = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.ErrFileHandle}
+		command.Stdout, command.Stderr = stdout, stderr
 	} else {
-		if readErr != nil {
-			return ch, readErr
-		} else {
-			return ch, nil
+		stderr = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.ErrFileHandle}
+		command.Stdout, command.Stderr = spill, stderr
+	}
+	if err := command.Start(); err != nil {
+		close(ch)
+		completeOutput(nil)
+		return ch, fmt.Errorf("start cmd #%d: %s: %w", c.ID, c.Cmd, err)
+	}
+	if err := controller.Started(command); err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		close(ch)
+		completeOutput(nil)
+		return ch, fmt.Errorf("register cmd #%d: %w", c.ID, err)
+	}
+	defer controller.Finished(command)
+	waited := make(chan error, 1)
+	go func() { waited <- command.Wait() }()
+	var timeout <-chan time.Time
+	var timer *time.Timer
+	if c.Timeout > 0 {
+		timer = time.NewTimer(c.Timeout)
+		timeout = timer.C
+		defer timer.Stop()
+	}
+	var waitErr, terminal error
+	select {
+	case waitErr = <-waited:
+	case <-c.Cancel:
+		terminal = ErrCancelled
+		_ = controller.KillCommand(command)
+		waitErr = <-waited
+	case <-timeout:
+		terminal = ErrTimeout
+		_ = controller.KillCommand(command)
+		waitErr = <-waited
+	}
+	c.exitStatus = command.ProcessState.ExitCode()
+	if errors.Is(terminal, ErrTimeout) {
+		c.exitStatus = 124
+	}
+	if errors.Is(terminal, ErrCancelled) && c.exitStatus == 0 {
+		c.exitStatus = 1
+	}
+	// A nonzero child status is already an externally visible terminal cause.
+	// Keep it primary while carrying any independent output failure separately.
+	if terminal == nil && waitErr != nil && c.exitStatus != 0 {
+		terminal = fmt.Errorf("wait cmd #%d: %s: %w", c.ID, c.Cmd, waitErr)
+	}
+	if opts.ImmediateOutput {
+		c.outputErr = firstWriterError(stdout, stderr)
+		if c.outputErr != nil && terminal == nil {
+			terminal = outputFailure{c.outputErr}
+		}
+		close(ch)
+		completeOutput(c.outputErr)
+		c.finishSendOutput = true
+	} else {
+		reader, spillErr := spill.finish()
+		c.outputErr = combineErrors(spillErr, firstWriterError(stderr))
+		if c.outputErr != nil && terminal == nil {
+			terminal = outputFailure{c.outputErr}
+		}
+		c.tmpfh, c.tmpfile = spill.file, spill.name
+		if reader != nil {
+			c.reader = bufio.NewReader(reader)
+		}
+		go c.sendOutput(ch, outputDone, c.outputErr)
+	}
+	if terminal == nil && waitErr != nil {
+		terminal = fmt.Errorf("wait cmd #%d: %s: %w", c.ID, c.Cmd, waitErr)
+	}
+	if terminal != nil && c.exitStatus == 0 {
+		c.exitStatus = 1
+	}
+	if terminal == nil {
+		c.Executed <- 1
+	}
+	close(c.Executed)
+	c.Err = terminal
+	if owned && terminal != nil {
+		_ = controller.StopAll(opts.CleanupTime, opts.forceStopChannel())
+	}
+	return ch, terminal
+}
+
+func (c *Command) sendOutput(ch chan string, done chan<- error, initialErr error) {
+	defer close(ch)
+	defer func() { c.finishSendOutput = true }()
+	if c.reader == nil {
+		done <- initialErr
+		close(done)
+		return
+	}
+	var readErr error
+	defer func() {
+		done <- combineErrors(initialErr, readErr)
+		close(done)
+	}()
+	buf := make([]byte, OutputChunkSize)
+	for {
+		n, err := c.reader.Read(buf)
+		if n > 0 {
+			ch <- string(buf[:n])
+		}
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				readErr = fmt.Errorf("read buffered output for cmd #%d: %w", c.ID, err)
+			}
+			return
 		}
 	}
 }
 
-// Cleanup removes tmpfile
-func (c *Command) Cleanup() error {
-	var err error
-	if c.tmpfh != nil {
-		// if Verbose {
-		// 	Log.Infof("close tmpfh for: %s", c.Cmd)
-		// }
-		err = c.tmpfh.Close()
+func combineErrors(errs ...error) error {
+	filtered := make([]error, 0, len(errs))
+	for _, err := range errs {
 		if err != nil {
+			filtered = append(filtered, err)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	if len(filtered) == 1 {
+		return filtered[0]
+	}
+	return errors.Join(filtered...)
+}
+
+type outputFailure struct{ error }
+
+func isOutputFailure(err error) bool {
+	var failure outputFailure
+	return errors.As(err, &failure)
+}
+
+func (c *Command) Cleanup() error {
+	var first error
+	if c.tmpfh != nil {
+		if err := closeSpillFile(c.tmpfh); err != nil {
+			first = err
+		}
+		c.tmpfh = nil
+	}
+	if c.tmpfile != "" {
+		if err := removeSpillFile(c.tmpfile); err != nil && !errors.Is(err, os.ErrNotExist) && first == nil {
+			first = err
+		}
+		c.tmpfile = ""
+	}
+	return first
+}
+func (c *Command) getExitStatus(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return 1
+}
+
+type spillWriter struct {
+	limit int
+	mem   bytes.Buffer
+	file  *os.File
+	buf   *bufio.Writer
+	name  string
+	err   error
+}
+
+func newSpillWriter(limit int) *spillWriter { return &spillWriter{limit: limit} }
+func (w *spillWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	if w.file == nil && w.mem.Len()+len(p) <= w.limit {
+		return w.mem.Write(p)
+	}
+	if w.file == nil {
+		f, err := createSpillFile()
+		if err != nil {
+			w.err = err
+			return 0, err
+		}
+		w.file, w.name, w.buf = f, f.Name(), bufio.NewWriter(f)
+		if err := writeAllWith(writeSpillFile, w.buf, w.mem.Bytes()); err != nil {
+			w.err = err
+			return 0, err
+		}
+		w.mem.Reset()
+	}
+	n, err := writeSpillFile(w.buf, p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.err = err
+	}
+	return n, err
+}
+func (w *spillWriter) finish() (io.Reader, error) {
+	if w.err != nil {
+		return nil, w.err
+	}
+	if w.file == nil {
+		return wrapSpillReader(bytes.NewReader(w.mem.Bytes())), nil
+	}
+	if err := flushSpillFile(w.buf); err != nil {
+		w.err = err
+		return nil, err
+	}
+	if _, err := seekSpillFile(w.file, 0, io.SeekStart); err != nil {
+		w.err = err
+		return nil, err
+	}
+	return wrapSpillReader(w.file), nil
+}
+func writeAllWith(write func(*bufio.Writer, []byte) (int, error), dst *bufio.Writer, p []byte) error {
+	n, err := write(dst, p)
+	if err != nil {
+		return err
+	}
+	if n != len(p) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+func writeAll(dst io.Writer, p []byte) error {
+	n, err := dst.Write(p)
+	if err != nil {
+		return err
+	}
+	if n != len(p) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+type lockedWriter struct {
+	mu    *sync.Mutex
+	dst   io.Writer
+	errMu sync.Mutex
+	err   error
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	if w == nil || w.dst == nil {
+		return len(p), nil
+	}
+	w.mu.Lock()
+	n, err := w.dst.Write(p)
+	w.mu.Unlock()
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.errMu.Lock()
+		if w.err == nil {
+			w.err = err
+		}
+		w.errMu.Unlock()
+	}
+	return n, err
+}
+func (w *lockedWriter) Error() error {
+	if w == nil {
+		return nil
+	}
+	w.errMu.Lock()
+	defer w.errMu.Unlock()
+	return w.err
+}
+func firstWriterError(ws ...*lockedWriter) error {
+	for _, w := range ws {
+		if err := w.Error(); err != nil {
 			return err
 		}
 	}
-
-	if c.tmpfile != "" {
-		if Verbose {
-			Log.Infof("remove tmpfile (%s) for command: %s", c.tmpfile, c.Cmd)
-		}
-		err = os.Remove(c.tmpfile)
-	}
-	return err
+	return nil
 }
 
-// ErrTimeout means command timeout
-var ErrTimeout = fmt.Errorf("time out")
-
-// ErrCancelled means command being cancelled
-var ErrCancelled = fmt.Errorf("cancelled")
-
-func (c *Command) getExitStatus(err error) int {
-	if exitError, ok := err.(*exec.ExitError); ok {
-		waitStatus := exitError.Sys().(syscall.WaitStatus)
-		return waitStatus.ExitStatus()
-	}
-	// no error, so return exitStatus 0
-	return 0
-}
-
-type TopLevelEnum int
-
-const (
-	NotTopLevel TopLevelEnum = 0
-	TopLevel    TopLevelEnum = 1
-)
-
-// lexicographically encode integer
-// based on http://www.zanopha.com/docs/elen.pdf
-func lexEncode(n uint64, topLevel TopLevelEnum) string {
-	var encoded string
-	// recursively calculate lex prefix
-	// the lex prefix allows the user to lexicographically sort the output
-	// need lex prefix if n has more than one digit
-	nstr := fmt.Sprintf("%d", n)
-	nlen := uint64(len(nstr))
-	if nlen > 1 {
-		// include non-numeric part of lex prefix
-		// to allow proper sorting, this char must come after numerics in the ascii table
-		encoded = "_"
-		// then include recursive part
-		encoded += lexEncode(nlen, NotTopLevel)
-		// conditionally include lex separator
-		if topLevel == TopLevel {
-			// the lex separator allows the user to differentiate a numeric part of the lex prefix from the original number
-			// to allow proper sorting, the lex separator must come before numerics in the ascii table
-			encoded += "."
-		}
-	}
-	// include numeric part of lex prefix, or
-	// original number (if topLevel==true)
-	encoded += nstr
-	return encoded
-}
-
-func getEntrySeparator() string {
-	// to allow proper sorting, the entry separator must come before numerics in the ascii table
-	return "/"
-}
-
-// ImmediateLineWriter is safe to use concurrently
 type ImmediateLineWriter struct {
-	lock          *sync.Mutex
-	numJobs       int
-	cmdId         uint64
-	tryNumber     int
-	line          string
-	lineNumber    uint64
-	includePrefix bool
-}
-
-func includeImmediatePrefix(cmdId uint64, tryNumber int, lineNumber uint64, data *string) {
-	prefix := fmt.Sprintf("(%s", lexEncode(cmdId, TopLevel))
-	prefix += fmt.Sprintf("%s%s", getEntrySeparator(), lexEncode(uint64(tryNumber), TopLevel))
-	prefix += fmt.Sprintf("%s%s): ", getEntrySeparator(), lexEncode(lineNumber, TopLevel))
-	if data != nil {
-		*data = *data + prefix
-	}
+	lock      *sync.Mutex
+	numJobs   int
+	cmdId     uint64
+	tryNumber int
 }
 
 func NewImmediateLineWriter(lock *sync.Mutex, numJobs int, cmdId uint64, tryNumber int) *ImmediateLineWriter {
-	lw := &ImmediateLineWriter{}
-	lw.lock = lock
-	lw.numJobs = numJobs
-	lw.cmdId = cmdId
-	lw.tryNumber = tryNumber
-	lw.lineNumber = 1       // start with 1
-	lw.includePrefix = true // start line 1 with a prefix
-	return lw
+	return &ImmediateLineWriter{lock: lock, numJobs: numJobs, cmdId: cmdId, tryNumber: tryNumber}
 }
-
-func (lw *ImmediateLineWriter) addPrefixIfNeeded(output *string) {
-	if lw.includePrefix {
-		includeImmediatePrefix(lw.cmdId, lw.tryNumber, lw.lineNumber, output)
-		lw.includePrefix = false
+func (lw *ImmediateLineWriter) WritePrefixedLines(input string, fh *os.File) {
+	if fh == nil {
+		return
 	}
-}
-
-func (lw *ImmediateLineWriter) WritePrefixedLines(input string, outfh *os.File) {
 	if lw.lock != nil {
-		// make immediate output thread-safe and do one write at a time
 		lw.lock.Lock()
-		// only include prefixes if jobs are running in parallel
-		if lw.numJobs > 1 {
-			var output string
-			// split by \r\n or \n
-			reg := regexp.MustCompile("(?:\r\n|\n)")
-			matchExtents := reg.FindAllStringIndex(input, -1)
-			if len(matchExtents) > 0 {
-				lastStart := 0
-				for _, matchExtent := range matchExtents {
-					beforePart := input[lastStart:matchExtent[0]]
-					lw.line = lw.line + beforePart
-					// skip empty lines
-					if len(lw.line) > 0 {
-						// there is some data in this part, so add prefix if needed
-						lw.addPrefixIfNeeded(&output)
-						// append the chars up to and including the delimiter
-						delimiterPart := input[matchExtent[0]:matchExtent[1]]
-						output = output + beforePart + delimiterPart
-						// defer including prefix, so only add it on next non-empty data
-						lw.includePrefix = true
-						// clear line, since saw delimiter
-						lw.line = ""
-						lw.lineNumber++
-					}
-					lastStart = matchExtent[1]
-				}
-				// append any remaining chars after the last delimiter
-				if lastStart < len(input) {
-					lastPart := input[lastStart:]
-					// there is some data in this part, so add prefix if needed
-					lw.addPrefixIfNeeded(&output)
-					lw.line = lw.line + lastPart
-					output = output + lastPart
-				}
-			} else {
-				// no delimiters in this section
-				// there is some input, so add prefix if needed
-				lw.addPrefixIfNeeded(&output)
-				lw.line = lw.line + input
-				output = output + input
-			}
-			if outfh != nil {
-				outfh.WriteString(output)
-			}
-		} else {
-			// no prefixes needed, since jobs are running serially
-			// just use the input string
-			if outfh != nil {
-				outfh.WriteString(input)
-			}
-		}
-		lw.lock.Unlock()
+		defer lw.lock.Unlock()
 	}
+	_, _ = fh.WriteString(input)
 }
 
 type ImmediateWriter struct {
@@ -405,68 +427,75 @@ type ImmediateWriter struct {
 	fh         *os.File
 }
 
-func NewImmediateWriter(lineWriter *ImmediateLineWriter, fh *os.File) *ImmediateWriter {
-	iw := &ImmediateWriter{}
-	iw.lineWriter = lineWriter
-	iw.fh = fh
-	return iw
+func NewImmediateWriter(lw *ImmediateLineWriter, fh *os.File) *ImmediateWriter {
+	return &ImmediateWriter{lineWriter: lw, fh: fh}
 }
-
-func (iw ImmediateWriter) Write(p []byte) (n int, err error) {
-	dataLen := len(p)
-	// only write non-empty data
-	if dataLen > 0 {
-		iw.lineWriter.WritePrefixedLines(string(p), iw.fh)
+func (iw ImmediateWriter) Write(p []byte) (int, error) {
+	if iw.fh == nil {
+		return len(p), nil
 	}
-	return dataLen, nil
+	if iw.lineWriter != nil && iw.lineWriter.lock != nil {
+		iw.lineWriter.lock.Lock()
+		defer iw.lineWriter.lock.Unlock()
+	}
+	n, err := iw.fh.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	return n, err
 }
 
-// from https://softwareengineering.stackexchange.com/questions/177428/sets-data-structure-in-golang
-type IntSet struct {
-	// set map[int]bool
-	set sync.Map
-}
+type IntSet struct{ set sync.Map }
 
-func (set *IntSet) Add(i int) bool {
-	// _, found := set.set[i]
-	// set.set[i] = true
-	_, found := set.set.Load(i)
-	set.set.Store(i, true)
+func (s *IntSet) Add(i int) bool { _, loaded := s.set.LoadOrStore(i, true); return !loaded }
 
-	return !found //False if it existed already
+type TopLevelEnum int
+
+const (
+	NotTopLevel TopLevelEnum = iota
+	TopLevel
+)
+
+func lexEncode(n uint64, _ TopLevelEnum) string { return fmt.Sprintf("%d", n) }
+func getEntrySeparator() string                 { return "/" }
+func includeImmediatePrefix(id uint64, try int, line uint64, data *string) {
+	if data != nil {
+		*data += fmt.Sprintf("(%d/%d/%d): ", id, try, line)
+	}
 }
 
 const (
-	INVALID_HANDLE int = 0
-
-	CTRL_C_SIGNAL     int = 0
-	CTRL_BREAK_SIGNAL int = 1
-	KILL_SIGNAL       int = 2
-
-	// bit mask
-	SEND_NO_SIGNAL         int = 0
-	SEND_CTRL_C_SIGNAL     int = 1
-	SEND_CTRL_BREAK_SIGNAL int = 2
-	SEND_KILL_SIGNAL       int = 4
+	INVALID_HANDLE = 0
+	CTRL_C_SIGNAL  = iota
+	CTRL_BREAK_SIGNAL
+	KILL_SIGNAL
+)
+const (
+	SEND_NO_SIGNAL     = 0
+	SEND_CTRL_C_SIGNAL = 1 << iota
+	SEND_CTRL_BREAK_SIGNAL
+	SEND_KILL_SIGNAL
 )
 
-func canSendSignal(childProcessName string, noSignalExes []string) (canSendSignal bool, err error) {
-	canSendSignal = true // first assume true
-	err = nil            // first assume no error
-	if len(noSignalExes) > 0 {
-		for _, noSignalExe := range noSignalExes {
-			if noSignalExe == "all" {
-				canSendSignal = false
-				break
-			} else {
-				if childProcessName == noSignalExe {
-					canSendSignal = false
-					break
-				}
-			}
+func canSendSignal(name string, excluded []string) (bool, error) {
+	for _, x := range excluded {
+		if x == "all" || strings.EqualFold(name, x) {
+			return false, nil
 		}
 	}
-	return canSendSignal, err
+	return true, nil
+}
+func getSignalsToSend(name string, noStop, noKill []string) (int, error) {
+	stop, _ := canSendSignal(name, noStop)
+	kill, _ := canSendSignal(name, noKill)
+	n := 0
+	if stop {
+		n |= SEND_CTRL_C_SIGNAL | SEND_CTRL_BREAK_SIGNAL
+	}
+	if kill {
+		n |= SEND_KILL_SIGNAL
+	}
+	return n, nil
 }
 
 type ProcessRecord struct {
@@ -475,950 +504,480 @@ type ProcessRecord struct {
 	processExists bool
 	accessGranted bool
 	signalsToSend int
+	pgid          int
+	identity      uint64
+	name          string
 }
 
-var pidRecords = make(map[int]ProcessRecord)
-
-func getProcessRecordFromPid(pidRecordsLock *sync.Mutex, pid int) (processRecord ProcessRecord, err error) {
-	pidRecordsLock.Lock()
-	processRecord, keyPresent := pidRecords[pid]
-	if !keyPresent {
-		processHandle, processExists, accessGranted, err := getProcess(pid)
-		if processHandle != INVALID_HANDLE && err == nil {
-			processRecord = ProcessRecord{
-				pid:           pid,
-				processHandle: processHandle,
-				processExists: processExists,
-				accessGranted: accessGranted,
-				signalsToSend: SEND_NO_SIGNAL}
-			pidRecords[pid] = processRecord
-		}
-	}
-	pidRecordsLock.Unlock()
-	return
+type processController interface {
+	Started(*exec.Cmd) error
+	Finished(*exec.Cmd)
+	KillCommand(*exec.Cmd) error
+	StopAll(time.Duration, <-chan struct{}) error
+	Close() error
 }
 
-func checkChildProcess(pidRecordsLock *sync.Mutex, childCheckProcess *psutil.Process, noStopExes []string, noKillExes []string) (
-	processHandle int,
-	considerChild bool,
-	signalsToSend int,
-	err error) {
-	considerChild = false          // first assume false
-	signalsToSend = SEND_NO_SIGNAL // first assume no signal
-	// use err2 for getProcessRecordFromPid(), since child may no longer exist
-	processRecord, err2 := getProcessRecordFromPid(pidRecordsLock, int(childCheckProcess.Pid))
-	processHandle = processRecord.processHandle
-	if err2 == nil {
-		if processHandle != INVALID_HANDLE {
-			// Don't look at parent-child relationships, since children, grandchildren, etc.
-			// could become orphaned at any time. Just look for the child marker to know.
-			considerChild, err = doesChildHaveMarker(childCheckProcess, processHandle)
-			if err == nil {
-				if considerChild {
-					var childProcessName string = ""
-					if len(noStopExes) > 0 || len(noKillExes) > 0 {
-						childProcessName, err = childCheckProcess.Name()
-						if err == nil {
-							if len(childProcessName) == 0 {
-								err = errors.New("childProcessName is empty")
-							}
-						}
-						if err != nil {
-							if Verbose {
-								Log.Error(err)
-							}
-						}
-					}
-					signalsToSend, err = getSignalsToSend(childProcessName, noStopExes, noKillExes)
-				}
-			} else {
-				if Verbose {
-					Log.Error(err)
-				}
-			}
-		} else {
-			// failed to open child process, so don't consider it
-		}
-	} else {
-		// failed to open child process, so don't consider it
-		// check response
-		if processRecord.processExists {
-			if processRecord.accessGranted {
-				// report errors from processes we could access
-				if Verbose {
-					Log.Error(err2)
-				}
-			} else { // access denied
-				// ignore error, since we failed to get a handle to the child
-				// it could be a system process that we are skipping anyway
-			}
-		} else { // process no longer exists
-			// ignore error since no process to signal
-		}
-	}
-	return
-}
+var makeProcessController = newPlatformProcessController
 
-// get a process record when the process belongs to this rush invocation
-func getProcessTreeRecursive(
-	pidRecordsLock *sync.Mutex,
-	childCheckProcess *psutil.Process,
-	noStopExes []string,
-	noKillExes []string,
-	pidsVisited *IntSet,
-) (processRecords []ProcessRecord) {
-	if considerPid(int(childCheckProcess.Pid)) {
-		// avoid cycles in pid tree by looking at visited set
-		if pidsVisited.Add(int(childCheckProcess.Pid)) {
-			processHandle, considerChild, signalsToSend, err := checkChildProcess(
-				pidRecordsLock,
-				childCheckProcess,
-				noStopExes,
-				noKillExes)
-			if err != nil {
-				if Verbose {
-					Log.Error(err)
-				}
-			}
-			if processHandle != INVALID_HANDLE {
-				if considerChild {
-					var processRecord = ProcessRecord{
-						processHandle: processHandle, pid: int(childCheckProcess.Pid), signalsToSend: signalsToSend}
-					processRecords = append(processRecords, processRecord)
-				} else {
-					pidRecordsLock.Lock()
-					releaseProcessByPid(int(childCheckProcess.Pid))
-					pidRecordsLock.Unlock()
-				}
-			}
-		}
-	}
-	return processRecords
-}
-
-func getChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillExes []string) (processRecords []ProcessRecord) {
-	// handle normal and orphaned children by getting all processes
-	// we'll check for duplicates later
-	allProcesses, err := psutil.Processes()
-
-	if err == nil {
-		// pidsVisited := IntSet{set: make(map[int]bool)}
-		pidsVisited := IntSet{set: sync.Map{}}
-
-		threads := 8 // runtime.NumCPU() 16 will panic
-		done := make(chan int)
-		ch := make(chan ProcessRecord, threads)
-		go func() {
-			for p := range ch {
-				processRecords = append(processRecords, p)
-			}
-			done <- 1
-		}()
-
-		tokens := make(chan int, threads)
-		var wg sync.WaitGroup
-
-		for _, childCheckProcess := range allProcesses {
-
-			wg.Add(1)
-			tokens <- 1
-			go func(childCheckProcess *psutil.Process) {
-				subProcessRecords := getProcessTreeRecursive(
-					pidRecordsLock,
-					childCheckProcess,
-					noStopExes,
-					noKillExes,
-					&pidsVisited)
-				for _, subProcessRecord := range subProcessRecords {
-					// processRecords = append(processRecords, subProcessRecord)
-					ch <- subProcessRecord
-				}
-
-				wg.Done()
-				<-tokens
-			}(childCheckProcess)
-		}
-
-		wg.Wait()
-		close(ch)
-		<-done
-	}
-	return processRecords
-}
-
-func signalChildProcesses(processRecords []ProcessRecord, signalNum int) (numChildrenSignaled int) {
-	// signal child processes
-	numChildrenSignaled = 0
-	expectedNumChildrenSignaled := 0
-	for _, processRecord := range processRecords {
-		sendSignal := false // first assume false
-		switch signalNum {
-		case CTRL_C_SIGNAL:
-			if processRecord.signalsToSend&SEND_CTRL_C_SIGNAL != 0 {
-				sendSignal = true
-			}
-		case CTRL_BREAK_SIGNAL:
-			if processRecord.signalsToSend&SEND_CTRL_BREAK_SIGNAL != 0 {
-				sendSignal = true
-			}
-		case KILL_SIGNAL:
-			if processRecord.signalsToSend&SEND_KILL_SIGNAL != 0 {
-				sendSignal = true
-			}
-		default:
-			Log.Error(errors.New("Unexpected signalNum"))
-		}
-		if sendSignal {
-			expectedNumChildrenSignaled += 1
-			err := signalProcess(processRecord, signalNum)
-			if err == nil {
-				numChildrenSignaled += 1
-			} else {
-				if Verbose {
-					Log.Error(err)
-				}
-			}
-		}
-	}
-	if expectedNumChildrenSignaled > 0 && numChildrenSignaled == 0 {
-		switch signalNum {
-		case CTRL_C_SIGNAL:
-			Log.Info("no child processes sent Ctrl+C signal")
-		case CTRL_BREAK_SIGNAL:
-			Log.Info("no child processes sent Ctrl+Break signal")
-		case KILL_SIGNAL:
-			Log.Info("no child processes killed")
-		default:
-			Log.Error(errors.New("Unexpected signalNum"))
-		}
-	}
-	return numChildrenSignaled
-}
-
-func anyRemainingChildren(processRecords []ProcessRecord) (anyRemaining bool) {
-	anyRemaining = false
-	for _, processRecord := range processRecords {
-		if doesProcessExist(processRecord.processHandle) {
-			anyRemaining = true
-			break
-		}
-	}
-	return anyRemaining
-}
-
-func pollRemainingChildren(processRecords []ProcessRecord, cleanupTime time.Duration, forceStop <-chan struct{}) (anyRemaining bool) {
-	anyRemaining = false
-	startTime := time.Now()
-	sleepTime := 250 * time.Millisecond
-	for {
-		continuePolling := false
-		anyRemaining = anyRemainingChildren(processRecords)
-		if anyRemaining && cleanupTime > 0 {
-			select {
-			case <-time.After(sleepTime):
-			case <-forceStop:
-				return true
-			}
-			elapsedTime := time.Since(startTime)
-			if elapsedTime < cleanupTime {
-				// exponential back off with limit:
-				// increase sleep time if next elapsedTime is below 1/2 of cleanupTime
-				if elapsedTime+sleepTime*2 < cleanupTime/2 {
-					// exponential back off
-					sleepTime *= 2
-				} else {
-					// use the same sleepTime as before
-				}
-				continuePolling = true
-			}
-		}
-		if !continuePolling {
-			break
-		}
-	}
-	return anyRemaining
-}
-
-// ensure our child processes are stopped
-func stopChildProcesses(pidRecordsLock *sync.Mutex, noStopExes []string, noKillExes []string, cleanupTime time.Duration, forceStop <-chan struct{}) (err error) {
-	err = nil            // first assume no error
-	anyRemaining := true // first assume some children
-	totalNumSignaled := 0
-	if canStopChildProcesses() {
-		processRecords := getChildProcesses(pidRecordsLock, noStopExes, noKillExes)
-		// progress from most graceful to most invasive stop signal
-		// if no matching children, then call is a noop
-		numSignaled := signalChildProcesses(processRecords, CTRL_C_SIGNAL)
-		if numSignaled > 0 {
-			totalNumSignaled += numSignaled
-			anyRemaining = pollRemainingChildren(processRecords, cleanupTime, forceStop)
-		} else {
-			anyRemaining = true
-		}
-		if anyRemaining {
-			numSignaled = signalChildProcesses(processRecords, CTRL_BREAK_SIGNAL)
-			if numSignaled > 0 {
-				totalNumSignaled += numSignaled
-				anyRemaining = pollRemainingChildren(processRecords, cleanupTime, forceStop)
-			} else {
-				anyRemaining = true
-			}
-			if anyRemaining {
-				numSignaled = signalChildProcesses(processRecords, KILL_SIGNAL)
-				totalNumSignaled += numSignaled
-			}
-		}
-		anyRemaining = pollRemainingChildren(processRecords, 0, forceStop) // wait zero time, since already waited above
-		// release process handles only after descending into all processes,
-		// to ensure pids do not get reused while descending
-		releaseProcesses(pidRecordsLock)
-	}
-	if anyRemaining && totalNumSignaled == 0 {
-		msg := "No child processes stopped or killed\n"
-		msg += "       " // seven spaces indent
-		msg += "You will need to manually stop or kill them"
-		err = errors.New(msg)
-	}
-	return err
-}
-
-func releaseProcessByPid(pid int) {
-	// no pidRecordsLock here, rely on caller to do it
-	processRecord, keyPresent := pidRecords[pid]
-	if keyPresent {
-		delete(pidRecords, processRecord.pid)
-		releaseProcessByHandle(processRecord.processHandle)
-	}
-}
-
-func releaseProcesses(pidRecordsLock *sync.Mutex) {
-	pidRecordsLock.Lock()
-	for _, processRecord := range pidRecords {
-		releaseProcessByPid(processRecord.pid)
-	}
-	pidRecordsLock.Unlock()
-}
-
-func getChildMarkerKey() string {
-	return "RUSH_CHILD_GROUP"
-}
-
-func getChildMarkerValue() string {
-	// place brackets on either side of the marker,
-	// so we only find exact matches
-	return "[" + ChildMarker + "]"
-}
-
-func getChildMarkerRegex() *regexp.Regexp {
-	// match string with one or more [pid_timestamp] values
-	return regexp.MustCompile(getChildMarkerKey() + "=\\[[0-z]+\\]")
-}
-
-func containsMarker(env string) bool {
-	childMarkerRegex := getChildMarkerRegex()
-	childMarkerValue := getChildMarkerValue()
-	match := childMarkerRegex.FindString(env)
-	return strings.Contains(match, childMarkerValue)
-}
-
-// run a command and pass output to c.reader.
-// Note that output returns only after finishing run.
-// This function is mainly borrowed from https://github.com/brentp/gargs .
-func (c *Command) run(opts *Options, tryNumber int) error {
-	t := time.Now()
-	chCancelMonitor := make(chan struct{})
-	defer func() {
-		close(chCancelMonitor)
-		c.Duration = time.Since(t)
-
-		close(c.Executed)
-	}()
-
-	var command *exec.Cmd
-	qcmd := fmt.Sprintf(`%s`, c.Cmd)
-	if Verbose {
-		Log.Infof("start cmd #%d: %s", c.ID, qcmd)
-	}
-
-	if c.Timeout > 0 {
-		c.ctx, c.ctxCancel = context.WithTimeout(context.Background(), c.Timeout)
-		command = getCommand(c.ctx, qcmd)
-	} else {
-		command = getCommand(context.TODO(), qcmd)
-	}
-
-	// mark child processes with our pid,
-	// so we can identify them later,
-	// in case we need to signal them
-	childMarkerKey := getChildMarkerKey()
-	childMarkerValue := getChildMarkerValue()
-	priorValue, found := os.LookupEnv(childMarkerKey)
-	if found {
-		// append marker values to sames key, so
-		// we can handle the nested calls case
-		childMarkerValue = priorValue + childMarkerValue
-	}
-	childMarker := fmt.Sprintf("%s=%s", childMarkerKey, childMarkerValue)
-	// command de-dups variables, in favor of later values
-	command.Env = append(os.Environ(), childMarker)
-
-	var pipeStdout io.ReadCloser = nil
-	var err error = nil
-	if opts.ImmediateOutput {
-		lineWriter := NewImmediateLineWriter(&opts.ImmediateLock, opts.Jobs, c.ID, tryNumber)
-		command.Stdout = NewImmediateWriter(lineWriter, opts.OutFileHandle)
-		command.Stderr = NewImmediateWriter(lineWriter, opts.ErrFileHandle)
-	} else {
-		pipeStdout, err = command.StdoutPipe()
-		if err != nil {
-			return errors.Wrapf(err, "get stdout pipe of cmd #%d: %s", c.ID, c.Cmd)
-		}
-		// no code yet for stderr handling, so just have it go to os.Stderr
-		command.Stderr = os.Stderr
-	}
-
-	err = command.Start()
-	if err != nil {
-		return errors.Wrapf(err, "start cmd #%d: %s", c.ID, c.Cmd)
-	}
-
-	var outPipe *bufio.Reader = nil
-	if !opts.ImmediateOutput {
-		outPipe = bufio.NewReaderSize(pipeStdout, TmpOutputDataBuffer)
-		// no errPipe setting here, since having the command's stderr go to os.Stderr above
-	}
-
-	chErr := make(chan error, 2) // may come from three sources, must be buffered
-	chEndBeforeTimeout := make(chan struct{})
-
-	go func() {
-		select {
-		case <-c.Cancel:
-			if Verbose {
-				Log.Warningf("cancel cmd #%d: %s", c.ID, c.Cmd)
-			}
-			opts.stopChildren()
-			chErr <- ErrCancelled
-		case <-chCancelMonitor:
-			// default:  // must not use default, if you must use, use for loop
-		}
-	}()
-
-	// detect timeout
-	if c.Timeout > 0 {
-		go func() { // goroutine #T
-			select {
-			case <-c.ctx.Done():
-				chErr <- ErrTimeout
-				c.ctxCancel()
-				return
-			case <-chEndBeforeTimeout:
-				chErr <- nil
-				return
-			}
-		}()
-	}
-
-	// --------------------------------
-
-	// handle output
-	var readed []byte
-
-	if c.Timeout > 0 {
-		// known shortcoming: this goroutine will remains even after timeout!
-		// this will cause data race.
-		go func() { // goroutine #P
-			// Peek is blocked method, it waits command even after timeout!!
-			if opts.ImmediateOutput {
-				// set EOF here, since handling output in readLine() above
-				err = io.EOF
-			} else {
-				readed, err = outPipe.Peek(TmpOutputDataBuffer)
-			}
-			chErr <- err
-		}()
-		err = <-chErr // from timeout #T or peek #P
-	} else {
-		if opts.ImmediateOutput {
-			// set EOF here, since handling output in readLine() above
-			err = io.EOF
-		} else {
-			readed, err = outPipe.Peek(TmpOutputDataBuffer)
-		}
-	}
-
-	// less than TmpOutputDataBuffer bytes in output...
-	if err == bufio.ErrBufferFull || err == io.EOF {
-		if c.Timeout > 0 {
-			go func() { // goroutine #W
-				err1 := command.Wait()
-				chErr <- err1
-				close(chEndBeforeTimeout)
-			}()
-			err = <-chErr // from timeout #T or normal exit #W
-			<-chErr       // from normal exit #W or timeout #T
-		} else {
-			err = command.Wait()
-		}
-
-		if opts.PropExitStatus {
-			c.exitStatus = c.getExitStatus(err)
-		}
-		if !opts.ImmediateOutput {
-			// get reader even on error, so we can still print the stdout and stderr of the failed child process
-			c.reader = bufio.NewReader(bytes.NewReader(readed))
-		}
-		if err != nil {
-			if strings.Contains(err.Error(), "interrupt") {
-				return nil
-			}
-			return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
-		}
-
-		c.Executed <- 1 // the command is executed!
-
-		return nil
-	}
-
-	// more than TmpOutputDataBuffer bytes in output. must use tmpfile
-	if opts.ImmediateOutput {
-		panic("code assumes immediate output case does not use tmpfile")
-	}
-	if err != nil {
-		return errors.Wrapf(err, "run cmd #%d: %s", c.ID, c.Cmd)
-	}
-
-	c.tmpfh, err = os.CreateTemp("", tmpfilePrefix)
-	if err != nil {
-		return errors.Wrapf(err, "create tmpfile for cmd #%d: %s", c.ID, c.Cmd)
-	}
-
-	c.tmpfile = c.tmpfh.Name()
-
-	if Verbose {
-		Log.Infof("create tmpfile (%s) for command: %s", c.tmpfile, c.Cmd)
-	}
-
-	btmp := bufio.NewWriter(c.tmpfh)
-	_, err = io.CopyBuffer(btmp, outPipe, readed)
-	if err != nil {
-		return errors.Wrapf(err, "save buffered data to tmpfile: %s", c.tmpfile)
-	}
-
-	if c, ok := pipeStdout.(io.ReadCloser); ok {
-		c.Close()
-	}
-	btmp.Flush()
-	_, err = c.tmpfh.Seek(0, 0)
-	if err == nil {
-		if c.Timeout > 0 {
-			go func() { // goroutine #3
-				err1 := command.Wait()
-				close(chEndBeforeTimeout)
-				chErr <- err1
-			}()
-			err = <-chErr // from timeout or normal exit
-			<-chErr       // wait unfinished goroutine
-		} else {
-			err = command.Wait()
-		}
-	}
-	if opts.PropExitStatus {
-		c.exitStatus = c.getExitStatus(err)
-	}
-	if err != nil {
-		if strings.Contains(err.Error(), "interrupt") {
-			return nil
-		}
-		return errors.Wrapf(err, "wait cmd #%d: %s", c.ID, c.Cmd)
-	}
-
-	c.Executed <- 1 // the command is executed!
-
-	return nil
-}
-
-// Options contains the options
 type Options struct {
-	DryRun bool // just print command
-	Jobs   int  // max jobs number
-
-	ETA    bool // show eta
-	ETABar *pb.ProgressBar
-
-	KeepOrder           bool          // keep output order
-	Retries             int           // max retry chances
-	RetryInterval       time.Duration // retry interval
-	OutFileHandle       *os.File      // where to send stdout
-	ErrFileHandle       *os.File      // where to send stderr
-	ImmediateOutput     bool          // print output immediately and interleaved
-	ImmediateLock       sync.Mutex    // make immediate output thread-safe and do one write at a time
-	PrintRetryOutput    bool          // print output from retries
-	Timeout             time.Duration // timeout
-	StopOnErr           bool          // stop on any error
-	PidRecordsLock      sync.Mutex    // make stop on error thread-safe
-	NoStopExes          []string      // exe names to exclude from stop signal
-	NoKillExes          []string      // exe names to exclude from kill signal
-	CleanupTime         time.Duration // time to allow children to clean up
-	PropExitStatus      bool          // propagate child exit status
-	RecordSuccessfulCmd bool          // send successful command to channel
+	DryRun              bool
+	Jobs                int
+	ETA                 bool
+	ETABar              *pb.ProgressBar
+	KeepOrder           bool
+	Retries             int
+	RetryInterval       time.Duration
+	OutFileHandle       *os.File
+	ErrFileHandle       *os.File
+	ImmediateOutput     bool
+	ImmediateLock       sync.Mutex
+	PrintRetryOutput    bool
+	Timeout             time.Duration
+	StopOnErr           bool
+	PidRecordsLock      sync.Mutex
+	NoStopExes          []string
+	NoKillExes          []string
+	CleanupTime         time.Duration
+	PropExitStatus      bool
+	RecordSuccessfulCmd bool
 	Verbose             bool
 	stopOnce            sync.Once
 	stopOnErrorOnce     sync.Once
 	forceStopInit       sync.Once
 	forceStopOnce       sync.Once
 	forceStop           chan struct{}
+	controller          processController
+	state               *runstate.State
 }
 
-func (opts *Options) forceStopChannel() <-chan struct{} {
-	opts.forceStopInit.Do(func() {
-		opts.forceStop = make(chan struct{})
-	})
-	return opts.forceStop
-}
-
-// ForceStop skips any remaining graceful cleanup delay and kills child processes.
-func (opts *Options) ForceStop() {
-	opts.forceStopOnce.Do(func() {
-		opts.forceStopChannel()
-		close(opts.forceStop)
-	})
-}
-
-func (opts *Options) stopChildren() {
-	opts.stopOnce.Do(func() {
-		err := stopChildProcesses(&opts.PidRecordsLock, opts.NoStopExes, opts.NoKillExes, opts.CleanupTime, opts.forceStopChannel())
-		if err != nil && Verbose {
-			Log.Error(err)
-		}
-	})
-}
-
-// Run4Output runs commands in parallel from channel chCmdStr.
-func Run4Output(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan string, chan string, chan int, chan int) {
-	runCtx, cancelRun := contextFromCancel(cancel)
-	chOut, chSuccessfulCmd, done, chExitStatus := Run4OutputContext(opts, runCtx, cancelRun, chCmdStr)
-	return chOut, chSuccessfulCmd, cancelAfterDone(done, cancelRun), chExitStatus
-}
-
-// Run4OutputContext runs commands in parallel and allows the caller and workers
-// to share the same cancellation signal.
-func Run4OutputContext(opts *Options, runCtx context.Context, cancelRun context.CancelFunc, chCmdStr chan string) (chan string, chan string, chan int, chan int) {
-	if opts.Verbose {
-		Verbose = true
+func (o *Options) forceStopChannel() <-chan struct{} {
+	if o.state != nil {
+		return o.state.ForceChan()
 	}
-	chCmd, chSuccessfulCmd, doneChCmd, chExitStatus := runContext(opts, runCtx, cancelRun, chCmdStr)
-	chOut := make(chan string, opts.Jobs)
-	done := make(chan int)
-
-	go func() {
-		var wg sync.WaitGroup
-
-		if !opts.KeepOrder { // do not keep order
-			tokens := make(chan int, opts.Jobs)
-
-		RECEIVECMD:
-			for c := range chCmd {
-				select {
-				case <-runCtx.Done():
-					break RECEIVECMD
-				default: // needed
-				}
-
-				wg.Add(1)
-				tokens <- 1
-
-				go func(c *Command) {
-					defer func() {
-						wg.Done()
-						<-tokens
-					}()
-
-					// read data from channel and outpput
-					// var N uint64
-					for msg := range c.Ch {
-						// if Verbose {
-						// 	N += uint64(len(msg))
-						// }
-						chOut <- msg
-					}
-					c.Cleanup()
-					if opts.ETA {
-						opts.ETABar.Add(1)
-					}
-
-					// if Verbose {
-					// 	Log.Debugf("receive %d bytes from cmd #%d\n", N, c.ID)
-					// }
-					// if Verbose {
-					// 	Log.Infof("finish receiving data from: %s", c.Cmd)
-					// }
-				}(c)
-			}
-
-		} else { // keep order
-			wg.Add(1)
-
-			var id uint64 = 1
-			var c, c1 *Command
-			var ok bool
-			cmds := make(map[uint64]*Command)
-		RECEIVECMD2:
-			for c = range chCmd {
-				select {
-				case <-runCtx.Done():
-					break RECEIVECMD2
-				default: // needed
-				}
-
-				if c.ID == id { // your turn
-					for msg := range c.Ch {
-						chOut <- msg
-					}
-					c.Cleanup()
-					if opts.ETA {
-						opts.ETABar.Add(1)
-					}
-
-					id++
-				} else { // wait the ID come out
-					for {
-						if c1, ok = cmds[id]; ok {
-							for msg := range c1.Ch {
-								chOut <- msg
-							}
-							c1.Cleanup()
-							if opts.ETA {
-								opts.ETABar.Add(1)
-							}
-
-							delete(cmds, c1.ID)
-							id++
-						} else {
-							break
-						}
-					}
-					cmds[c.ID] = c
-				}
-			}
-			if len(cmds) > 0 {
-				ids := make(sortutil.Uint64Slice, len(cmds))
-				i := 0
-				for id = range cmds {
-					ids[i] = id
-					i++
-				}
-				sort.Sort(ids)
-				for _, id = range ids {
-					c := cmds[id]
-					for msg := range c.Ch {
-						chOut <- msg
-					}
-					c.Cleanup()
-					if opts.ETA {
-						opts.ETABar.Add(1)
-					}
-				}
-			}
-
-			wg.Done()
+	o.forceStopInit.Do(func() { o.forceStop = make(chan struct{}) })
+	return o.forceStop
+}
+func (o *Options) ForceStop() {
+	if o.state != nil {
+		o.state.Force()
+		return
+	}
+	o.forceStopOnce.Do(func() {
+		o.forceStopChannel()
+		close(o.forceStop)
+	})
+}
+func (o *Options) stopChildren() {
+	o.stopOnce.Do(func() {
+		if o.controller != nil {
+			_ = o.controller.StopAll(o.CleanupTime, o.forceStopChannel())
 		}
-
-		<-doneChCmd
-		wg.Wait()
-		close(chOut)
-
-		// if Verbose {
-		// 	Log.Infof("finish sending all output")
-		// }
-		done <- 1
-	}()
-	return chOut, chSuccessfulCmd, done, chExitStatus
+	})
 }
 
+type runResult struct {
+	command   *Command
+	success   bool
+	status    int
+	outputErr error
+}
+
+type outputPart struct {
+	command *Command
+	ch      <-chan string
+	done    <-chan error
+	emit    bool
+}
+
+func combineCommandOutputs(parts []outputPart) (chan string, <-chan error) {
+	out := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() {
+		var first error
+		for _, part := range parts {
+			for value := range part.ch {
+				if part.emit {
+					out <- value
+				}
+			}
+			if err := <-part.done; err != nil && first == nil {
+				first = err
+			}
+			if err := part.command.Cleanup(); err != nil && first == nil {
+				first = err
+			}
+		}
+		close(out)
+		done <- first
+		close(done)
+	}()
+	return out, done
+}
+
+func Run4Output(opts *Options, cancel chan struct{}, input chan string) (chan string, chan string, chan int, chan int) {
+	ctx, stop := contextFromCancel(cancel)
+	out, success, done, statuses := Run4OutputContext(opts, ctx, stop, input)
+	return out, success, cancelAfterDone(done, stop), statuses
+}
+func Run(opts *Options, cancel chan struct{}, input chan string) (chan *Command, chan string, chan int, chan int) {
+	ctx, stop := contextFromCancel(cancel)
+	cmds, success, done, statuses := runContext(opts, ctx, stop, input)
+	return cmds, success, cancelAfterDone(done, stop), statuses
+}
+
+func Run4OutputContext(opts *Options, ctx context.Context, stop context.CancelFunc, input chan string) (chan string, chan string, chan int, chan int) {
+	commands, success, commandDone, statuses := runContext(opts, ctx, stop, input)
+	out := make(chan string, max(1, opts.Jobs))
+	done := make(chan int, 1)
+	go func() {
+		defer func() { close(out); done <- 1; close(done) }()
+		next := uint64(1)
+		pending := make(map[uint64]*Command)
+		emit := func(c *Command) {
+			for msg := range c.Ch {
+				out <- msg
+			}
+			if err := c.Cleanup(); err != nil {
+				opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+			}
+			if opts.ETA {
+				_ = opts.ETABar.Add(1)
+			}
+		}
+		for c := range commands {
+			if !opts.KeepOrder {
+				emit(c)
+				continue
+			}
+			pending[c.ID] = c
+			for pending[next] != nil {
+				emit(pending[next])
+				delete(pending, next)
+				next++
+			}
+		}
+		ids := make([]int, 0, len(pending))
+		for id := range pending {
+			ids = append(ids, int(id))
+		}
+		sort.Ints(ids)
+		for _, id := range ids {
+			emit(pending[uint64(id)])
+		}
+		<-commandDone
+	}()
+	return out, success, done, statuses
+}
+
+func runContext(opts *Options, parent context.Context, stop context.CancelFunc, input chan string) (chan *Command, chan string, chan int, chan int) {
+	if opts.Jobs < 1 {
+		opts.Jobs = 1
+	}
+	if opts.OutFileHandle == nil {
+		opts.OutFileHandle = os.Stdout
+	}
+	if opts.ErrFileHandle == nil {
+		opts.ErrFileHandle = os.Stderr
+	}
+	Verbose = opts.Verbose
+	state, ok := runstate.FromContext(parent)
+	ctx := parent
+	if !ok {
+		state, ctx = runstate.New(parent)
+	}
+	opts.state = state
+	controller, controllerErr := makeProcessController(opts)
+	opts.controller = controller
+	commands := make(chan *Command, opts.Jobs)
+	success := make(chan string, opts.Jobs)
+	done := make(chan int, 1)
+	var statuses chan int
+	if opts.PropExitStatus {
+		statuses = make(chan int, opts.Jobs)
+	}
+	results := make(chan runResult, opts.Jobs)
+	type outputCompletion struct {
+		sequence uint64
+		err      error
+	}
+	type supervisedResult struct {
+		result                runResult
+		outputComplete        bool
+		outputFailureReported bool
+	}
+	outputCompletions := make(chan outputCompletion, opts.Jobs)
+	go func() {
+		defer func() { done <- 1; close(done) }()
+		if controllerErr != nil {
+			state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+			if controller != nil {
+				_ = controller.Close()
+			}
+			close(commands)
+			close(success)
+			if statuses != nil {
+				close(statuses)
+			}
+			return
+		}
+		var workers sync.WaitGroup
+		var outputWaiters sync.WaitGroup
+		id := uint64(1)
+		active := 0
+		inflight := 0
+		awaitingOutput := 0
+		inputOpen := true
+		cancelled := false
+		cancelCh := ctx.Done()
+		nextSequence := uint64(1)
+		nextFinalize := uint64(1)
+		pending := make(map[uint64]*supervisedResult)
+		reportOutputFailure := func(result *supervisedResult, err error) {
+			if err == nil {
+				return
+			}
+			result.result.outputErr = err
+			result.result.success = false
+			if result.result.status == 0 {
+				result.result.status = 1
+			}
+			if result.result.command != nil {
+				result.result.command.outputErr = err
+				if result.result.command.Err == nil {
+					result.result.command.Err = outputFailure{err}
+				}
+			}
+			if !result.outputFailureReported {
+				Log.Error(err)
+				state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+				result.outputFailureReported = true
+			}
+		}
+		finalizeReady := func() {
+			for {
+				result := pending[nextFinalize]
+				if result == nil || !result.outputComplete {
+					return
+				}
+				if statuses != nil {
+					statuses <- result.result.status
+				}
+				if result.result.success && opts.RecordSuccessfulCmd {
+					success <- result.result.command.Cmd
+				}
+				delete(pending, nextFinalize)
+				nextFinalize++
+			}
+		}
+		for inputOpen || inflight > 0 {
+			var inputCh <-chan string
+			if inputOpen && !cancelled && inflight < opts.Jobs {
+				inputCh = input
+			}
+			var resultCh <-chan runResult
+			if active > 0 {
+				resultCh = results
+			}
+			var outputCompletionCh <-chan outputCompletion
+			if awaitingOutput > 0 {
+				outputCompletionCh = outputCompletions
+			}
+			select {
+			case <-cancelCh:
+				cancelled = true
+				inputOpen = false
+				cancelCh = nil
+			case text, open := <-inputCh:
+				if !open {
+					inputOpen = false
+					continue
+				}
+				// A ready input send and cancellation may race in select. Recheck
+				// before launching so queued work never starts after cancellation.
+				if ctx.Err() != nil {
+					cancelled = true
+					inputOpen = false
+					continue
+				}
+				workers.Add(1)
+				active++
+				inflight++
+				go func(id uint64, text string) {
+					defer workers.Done()
+					results <- executeWithRetries(ctx, opts, controller, id, text)
+				}(id, text)
+				id++
+			case result := <-resultCh:
+				active--
+				sequence := nextSequence
+				nextSequence++
+				supervised := &supervisedResult{result: result}
+				pending[sequence] = supervised
+				if result.outputErr != nil {
+					reportOutputFailure(supervised, result.outputErr)
+				}
+				if result.command == nil {
+					supervised.outputComplete = true
+					inflight--
+					finalizeReady()
+					continue
+				}
+				commands <- result.command
+				awaitingOutput++
+				outputWaiters.Add(1)
+				go func(sequence uint64, outputDone <-chan error) {
+					defer outputWaiters.Done()
+					outputCompletions <- outputCompletion{sequence: sequence, err: <-outputDone}
+				}(sequence, result.command.outputDone)
+			case completion := <-outputCompletionCh:
+				awaitingOutput--
+				inflight--
+				supervised := pending[completion.sequence]
+				if supervised != nil {
+					reportOutputFailure(supervised, completion.err)
+					supervised.outputComplete = true
+				}
+				finalizeReady()
+			}
+		}
+		workers.Wait()
+		outputWaiters.Wait()
+		if ctx.Err() != nil {
+			if err := controller.StopAll(opts.CleanupTime, state.ForceChan()); err != nil {
+				state.Record(runstate.Cause{Kind: runstate.Internal, Status: 1})
+			}
+		}
+		if err := controller.Close(); err != nil {
+			state.Record(runstate.Cause{Kind: runstate.Internal, Status: 1})
+		}
+		close(commands)
+		close(success)
+		if statuses != nil {
+			close(statuses)
+		}
+	}()
+	return commands, success, done, statuses
+}
+
+func executeWithRetries(ctx context.Context, opts *Options, controller processController, id uint64, text string) runResult {
+	var parts []outputPart
+	var command *Command
+	finish := func(success bool, status int, outputErr error) runResult {
+		command.Ch, command.outputDone = combineCommandOutputs(parts)
+		return runResult{command: command, success: success, status: status, outputErr: outputErr}
+	}
+	for attempt := 0; attempt <= opts.Retries; attempt++ {
+		command = NewCommand(id, text, ctx.Done(), opts.Timeout)
+		command.controller = controller
+		command.dryrun = opts.DryRun
+		ch, err := command.Run(opts, attempt+1)
+		if command.outputErr != nil {
+			if err != nil {
+				Log.Error(err)
+			}
+			parts = append(parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: opts.PrintRetryOutput || attempt == opts.Retries})
+			status := command.exitStatus
+			if status == 0 {
+				status = 1
+			}
+			if opts.StopOnErr && err != nil && !isOutputFailure(err) && !errors.Is(err, ErrCancelled) {
+				opts.state.Stop(runstate.Cause{Kind: runstate.StopOnError, Status: status})
+				Log.Error("stop on first error")
+			}
+			return finish(false, status, command.outputErr)
+		}
+		if err == nil {
+			parts = append(parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: true})
+			return finish(true, command.exitStatus, nil)
+		}
+		Log.Error(err)
+		parts = append(parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: opts.PrintRetryOutput || attempt == opts.Retries})
+		if isOutputFailure(err) {
+			return finish(false, 1, err)
+		}
+		if opts.StopOnErr && !errors.Is(err, ErrCancelled) {
+			status := command.exitStatus
+			if status == 0 {
+				status = 1
+			}
+			opts.state.Stop(runstate.Cause{Kind: runstate.StopOnError, Status: status})
+			Log.Error("stop on first error")
+			return finish(false, status, nil)
+		}
+		if errors.Is(err, ErrCancelled) || attempt == opts.Retries {
+			return finish(false, command.exitStatus, nil)
+		}
+		timer := time.NewTimer(opts.RetryInterval)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return finish(false, command.exitStatus, nil)
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}
+	return runResult{command: command}
+}
+
+func drain(ch <-chan string) {
+	for range ch {
+	}
+}
+func drainAndCleanup(c *Command) { drain(c.Ch); _ = c.Cleanup() }
+func combine(inputs []<-chan string) chan string {
+	out := make(chan string, 1)
+	go func() {
+		defer close(out)
+		for _, input := range inputs {
+			for value := range input {
+				out <- value
+			}
+		}
+	}()
+	return out
+}
+func combineWorker(input <-chan string, output chan<- string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for value := range input {
+		output <- value
+	}
+}
 func contextFromCancel(cancel <-chan struct{}) (context.Context, context.CancelFunc) {
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	ctx, stop := context.WithCancel(context.Background())
 	go func() {
 		select {
 		case <-cancel:
-			cancelRun()
-		case <-runCtx.Done():
+			stop()
+		case <-ctx.Done():
 		}
 	}()
-	return runCtx, cancelRun
+	return ctx, stop
 }
-
-func cancelAfterDone(done <-chan int, cancelRun context.CancelFunc) chan int {
-	doneAndCancelled := make(chan int)
+func cancelAfterDone(done <-chan int, stop context.CancelFunc) chan int {
+	out := make(chan int, 1)
 	go func() {
-		<-done
-		cancelRun()
-		doneAndCancelled <- 1
+		value, ok := <-done
+		stop()
+		if ok {
+			out <- value
+		}
+		close(out)
 	}()
-	return doneAndCancelled
+	return out
 }
-
-// write strings and report done
-func combineWorker(input <-chan string, output chan<- string, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for val := range input {
-		output <- val
-	}
+func containsMarker(env string) bool {
+	return regexp.MustCompile(`RUSH_CHILD_GROUP=.*\[rush\]`).MatchString(env)
 }
-
-// combine strings in input order
-func combine(inputs []<-chan string, output chan<- string) {
-	group := new(sync.WaitGroup)
-	go func() {
-		for _, input := range inputs {
-			group.Add(1)
-			go combineWorker(input, output, group)
-			group.Wait() // preserve input order
-		}
-		close(output)
-	}()
-}
-
-// Run runs commands in parallel from channel chCmdStr.
-func Run(opts *Options, cancel chan struct{}, chCmdStr chan string) (chan *Command, chan string, chan int, chan int) {
-	runCtx, cancelRun := contextFromCancel(cancel)
-	chCmd, chSuccessfulCmd, done, chExitStatus := runContext(opts, runCtx, cancelRun, chCmdStr)
-	return chCmd, chSuccessfulCmd, cancelAfterDone(done, cancelRun), chExitStatus
-}
-
-func runContext(opts *Options, runCtx context.Context, cancelRun context.CancelFunc, chCmdStr chan string) (chan *Command, chan string, chan int, chan int) {
-	if opts.Verbose {
-		Verbose = true
-	}
-
-	chCmd := make(chan *Command, opts.Jobs)
-	var chSuccessfulCmd chan string
-	chSuccessfulCmd = make(chan string, opts.Jobs)
-	done := make(chan int)
-	var chExitStatus chan int
-	if opts.PropExitStatus {
-		chExitStatus = make(chan int, opts.Jobs)
-	}
-
-	go func() {
-		var wg sync.WaitGroup
-		tokens := make(chan int, opts.Jobs)
-		var id uint64 = 1
-	RECEIVECMD:
-		for cmdStr := range chCmdStr {
-			select {
-			case <-runCtx.Done():
-				if Verbose {
-					Log.Debugf("cancel receiving commands")
-				}
-				break RECEIVECMD
-			default: // needed
-			}
-
-			select {
-			case tokens <- 1:
-			case <-runCtx.Done():
-				break RECEIVECMD
-			}
-			select {
-			case <-runCtx.Done():
-				<-tokens
-				break RECEIVECMD
-			default:
-			}
-			wg.Add(1)
-
-			go func(id uint64, cmdStr string) {
-				defer func() {
-					wg.Done()
-					<-tokens
-				}()
-
-				command := NewCommand(id, cmdStr, runCtx.Done(), opts.Timeout)
-
-				if opts.DryRun {
-					command.dryrun = true
-				}
-
-				chances := opts.Retries
-				var outputsToPrint []<-chan string
-				for {
-					tryNumber := opts.Retries - chances + 1
-					ch, err := command.Run(opts, tryNumber)
-					if err != nil { // fail to run
-						if chances == 0 || opts.StopOnErr {
-							// print final output
-							outputsToPrint = append(outputsToPrint, ch)
-							Log.Error(err)
-							if opts.PropExitStatus {
-								chExitStatus <- command.exitStatus
-							}
-							command.Ch = make(chan string, 1)
-							combine(outputsToPrint, command.Ch)
-							chCmd <- command
-						} else {
-							Log.Warning(err)
-						}
-
-						if opts.StopOnErr {
-							opts.stopOnErrorOnce.Do(func() {
-								Log.Error("stop on first error")
-								cancelRun()
-							})
-							opts.stopChildren()
-							return
-						}
-						if chances > 0 {
-							if opts.PrintRetryOutput {
-								outputsToPrint = append(outputsToPrint, ch)
-							}
-							if Verbose && opts.Retries > 0 {
-								Log.Warningf("retry %d/%d times: %s",
-									tryNumber,
-									opts.Retries,
-									command.Cmd)
-							}
-							chances--
-							<-time.After(opts.RetryInterval)
-
-							command.Executed = make(chan int, 2) // recreate it to avoid panic: close of closed channel
-
-							continue
-						}
-						return
-					}
-					// print final output
-					outputsToPrint = append(outputsToPrint, ch)
-					if opts.PropExitStatus {
-						chExitStatus <- command.exitStatus
-					}
-					break
-				}
-
-				command.Ch = make(chan string, 1)
-				combine(outputsToPrint, command.Ch)
-				chCmd <- command
-				// After sending the command, it's not guaranteed that the command is executed.
-				// so, a feedback is needed.
-				v := <-command.Executed
-				if v == 1 {
-					chSuccessfulCmd <- cmdStr
-				}
-
-			}(id, cmdStr)
-			id++
-		}
-		if runCtx.Err() != nil {
-			opts.stopChildren()
-		}
-		wg.Wait()
-
-		close(chCmd)
-		close(chSuccessfulCmd)
-		if opts.PropExitStatus {
-			close(chExitStatus)
-		}
-		done <- 1
-	}()
-	return chCmd, chSuccessfulCmd, done, chExitStatus
-}
+func getChildMarkerKey() string           { return "RUSH_CHILD_GROUP" }
+func getChildMarkerValue() string         { return "[rush]" }
+func getChildMarkerRegex() *regexp.Regexp { return regexp.MustCompile(`RUSH_CHILD_GROUP=.*\[rush\]`) }

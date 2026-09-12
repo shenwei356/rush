@@ -23,22 +23,46 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
 	pb "github.com/schollz/progressbar/v3"
+	"github.com/shenwei356/rush/internal/runstate"
 	"github.com/shenwei356/rush/process"
 	"github.com/shenwei356/util/stringutil"
 	"github.com/shenwei356/xopen"
 	"github.com/spf13/cobra"
 )
+
+var writeSuccessfulCommandFile = func(w *bufio.Writer, value string) (int, error) { return w.WriteString(value) }
+var flushSuccessfulCommandFile = func(w *bufio.Writer) error { return w.Flush() }
+var truncateSuccessfulCommandFile = func(f *os.File, size int64) error { return f.Truncate(size) }
+var seekSuccessfulCommandFile = func(f *os.File, offset int64, whence int) (int64, error) {
+	return f.Seek(offset, whence)
+}
+
+func appendSuccessfulCommand(w *bufio.Writer, command string) error {
+	if _, err := writeSuccessfulCommandFile(w, command+endMarkOfCMD); err != nil {
+		return err
+	}
+	return flushSuccessfulCommandFile(w)
+}
+
+func rollbackSuccessfulCommands(w *bufio.Writer, f *os.File, size int64) error {
+	w.Reset(f)
+	if err := truncateSuccessfulCommandFile(f, size); err != nil {
+		return err
+	}
+	_, err := seekSuccessfulCommandFile(f, 0, os.SEEK_END)
+	return err
+}
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -170,11 +194,12 @@ Preset variable (macro):
 
 		var succCmds = make(map[string]struct{})
 		var bfhSuccCmds *bufio.Writer
+		var fhSuccCmds *os.File
+		var succCmdOriginalSize int64
 		if config.Continue {
 			var existed bool
 			existed, err = exists(config.SuccCmdFile)
 			checkError(err)
-			var fhSuccCmds *os.File
 			if existed {
 				succCmds = readSuccCmds(config.SuccCmdFile)
 				fhSuccCmds, err = os.OpenFile(config.SuccCmdFile, os.O_APPEND|os.O_WRONLY, 0664)
@@ -182,6 +207,9 @@ Preset variable (macro):
 				fhSuccCmds, err = os.Create(config.SuccCmdFile)
 			}
 			checkError(err)
+			info, statErr := fhSuccCmds.Stat()
+			checkError(statErr)
+			succCmdOriginalSize = info.Size()
 
 			defer fhSuccCmds.Close()
 
@@ -189,22 +217,24 @@ Preset variable (macro):
 		}
 
 		opts := &process.Options{
-			DryRun:              config.DryRun,
-			Jobs:                config.Jobs,
-			ETA:                 config.ETA,
-			KeepOrder:           config.KeepOrder,
-			Retries:             config.Retries,
-			RetryInterval:       time.Duration(config.RetryInterval * float64(time.Second)),
-			OutFileHandle:       outfh,
-			ErrFileHandle:       errfh,
-			ImmediateOutput:     config.ImmediateOutput,
-			PrintRetryOutput:    config.PrintRetryOutput,
-			Timeout:             time.Duration(config.Timeout) * time.Second,
-			StopOnErr:           config.StopOnErr,
-			NoStopExes:          config.NoStopExes,
-			NoKillExes:          config.NoKillExes,
-			CleanupTime:         time.Duration(config.CleanupTime) * time.Second,
-			PropExitStatus:      config.PropExitStatus,
+			DryRun:           config.DryRun,
+			Jobs:             config.Jobs,
+			ETA:              config.ETA,
+			KeepOrder:        config.KeepOrder,
+			Retries:          config.Retries,
+			RetryInterval:    time.Duration(config.RetryInterval * float64(time.Second)),
+			OutFileHandle:    outfh,
+			ErrFileHandle:    errfh,
+			ImmediateOutput:  config.ImmediateOutput,
+			PrintRetryOutput: config.PrintRetryOutput,
+			Timeout:          time.Duration(config.Timeout) * time.Second,
+			StopOnErr:        config.StopOnErr,
+			NoStopExes:       config.NoStopExes,
+			NoKillExes:       config.NoKillExes,
+			CleanupTime:      time.Duration(config.CleanupTime) * time.Second,
+			// Always collect statuses here so timeout retains its documented 124
+			// even when ordinary child-status propagation is disabled.
+			PropExitStatus:      true,
 			Verbose:             config.Verbose,
 			RecordSuccessfulCmd: config.Continue,
 		}
@@ -230,8 +260,36 @@ Preset variable (macro):
 
 		// ---------------------------------------------------------------
 
-		runCtx, cancelRun := context.WithCancel(context.Background())
+		state, runCtx := runstate.New(nil)
+		cancelRun := state.Cancel
 		defer cancelRun()
+
+		chExitSignalMonitor := make(chan struct{})
+		signalChan := make(chan os.Signal, 2)
+		cleanupDone := make(chan int)
+		signal.Notify(signalChan, terminationSignals()...)
+		go func() {
+			interrupted := false
+			for {
+				select {
+				case sig := <-signalChan:
+					if interrupted {
+						log.Criticalf("received another interrupt, killing unfinished commands...")
+						state.Force()
+						opts.ForceStop()
+						continue
+					}
+					interrupted = true
+					status := terminationStatus(sig)
+					log.Criticalf("received an interrupt, stopping unfinished commands...")
+					state.Stop(runstate.Cause{Kind: runstate.Signal, Status: status})
+				case <-chExitSignalMonitor:
+					signal.Stop(signalChan)
+					cleanupDone <- 1
+					return
+				}
+			}
+		}()
 
 		donePreprocessFiles := make(chan int)
 
@@ -242,13 +300,20 @@ Preset variable (macro):
 		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4OutputContext(opts, runCtx, cancelRun, chCmdStr)
 
 		doneCheckSuccCmd := make(chan int)
-		var nSuccCmds int
+		var nSuccCmds atomic.Int64
+		var succCmdWriteErr error
 		go func() {
 			for c := range chSuccessfulCmd {
-				nSuccCmds++
+				nSuccCmds.Add(1)
 				if config.Continue {
-					bfhSuccCmds.WriteString(c + endMarkOfCMD)
-					bfhSuccCmds.Flush()
+					if succCmdWriteErr != nil {
+						continue
+					}
+					succCmdWriteErr = appendSuccessfulCommand(bfhSuccCmds, c)
+					if succCmdWriteErr != nil {
+						log.Error(errors.Wrap(succCmdWriteErr, "write successful-command file"))
+						state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+					}
 				}
 			}
 			doneCheckSuccCmd <- 1
@@ -259,17 +324,31 @@ Preset variable (macro):
 		anyCommands := false
 
 		var inputlines []string
+	READ_INPUT:
 		for _, file := range config.Infiles {
+			if runCtx.Err() != nil {
+				break
+			}
 			// input file handler
 			var infh *os.File
 			if isStdin(file) {
 				infh = os.Stdin
 			} else {
-				infh, err = os.Open(file)
+				infh, err = openInputFile(file)
 				checkError(err)
 				defer infh.Close()
 			}
-			scanner := bufio.NewScanner(infh)
+			scanner := bufio.NewScanner(newInputReader(infh, runCtx))
+			inputCloserDone := make(chan struct{})
+			inputCloserExited := make(chan struct{})
+			go func(f *os.File) {
+				defer close(inputCloserExited)
+				select {
+				case <-runCtx.Done():
+					_ = f.Close()
+				case <-inputCloserDone:
+				}
+			}(infh)
 			// 2147483647: max int32
 			scanner.Buffer(make([]byte, 0, 16384), 2147483647)
 			scanner.Split(split)
@@ -280,11 +359,19 @@ Preset variable (macro):
 					if config.Verbose {
 						log.Warningf("cancel reading file: %s", file)
 					}
+					close(inputCloserDone)
+					<-inputCloserExited
+					break READ_INPUT
 				default:
 				}
 				inputlines = append(inputlines, scanner.Text())
 			}
-			checkError(errors.Wrap(scanner.Err(), "read input data"))
+			close(inputCloserDone)
+			<-inputCloserExited
+			if scanErr := scanner.Err(); scanErr != nil && runCtx.Err() == nil {
+				state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+				checkError(errors.Wrap(scanErr, "read input data"))
+			}
 		}
 
 		if opts.ETA {
@@ -337,7 +424,7 @@ Preset variable (macro):
 				records = append(records, record)
 
 				if len(records) == n {
-					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-nSuccCmds)
+					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
 					checkError(errors.Wrap(err, "fill command"))
 					if config.Escape {
 						cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
@@ -369,7 +456,7 @@ Preset variable (macro):
 				}
 			}
 			if len(records) > 0 {
-				cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-nSuccCmds)
+				cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
 				checkError(errors.Wrap(err, "fill command"))
 				if config.Escape {
 					cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
@@ -398,10 +485,17 @@ Preset variable (macro):
 
 		// read from chOutput and print
 		doneOutput := make(chan int)
+		var outputWriteErr error
 		go func() {
 			last := time.Now().Add(2 * time.Second)
 			for c := range chOutput {
-				outfh.WriteString(c)
+				if outputWriteErr == nil {
+					_, outputWriteErr = outfh.WriteString(c)
+					if outputWriteErr != nil {
+						log.Error(errors.Wrap(outputWriteErr, "write command output"))
+						state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+					}
+				}
 				if t := time.Now(); t.After(last) {
 					last = t.Add(2 * time.Second)
 				}
@@ -411,59 +505,32 @@ Preset variable (macro):
 
 		var pToolExitStatus *int = nil
 		var doneExitStatus chan int
-		if config.PropExitStatus {
-			doneExitStatus = make(chan int)
-			toolExitStatus := 0
-			go func() {
-				for childCode := range chExitStatus {
-					setPointer := false
-					setCode := false
-					if pToolExitStatus == nil {
-						setPointer = true
+		doneExitStatus = make(chan int)
+		toolExitStatus := 0
+		go func() {
+			for childCode := range chExitStatus {
+				setPointer := false
+				setCode := false
+				if pToolExitStatus == nil {
+					setPointer = true
+					setCode = true
+				} else {
+					// use the code from the first error we received
+					if *pToolExitStatus == 0 && childCode != 0 {
 						setCode = true
-					} else {
-						// use the code from the first error we received
-						if *pToolExitStatus == 0 && childCode != 0 {
-							setCode = true
-						}
-					}
-					if setPointer {
-						pToolExitStatus = &toolExitStatus
-					}
-					if setCode {
-						*pToolExitStatus = childCode
 					}
 				}
-				doneExitStatus <- 1
-			}()
-		}
-
-		// ---------------------------------------------------------------
-
-		chExitSignalMonitor := make(chan struct{})
-		signalChan := make(chan os.Signal, 1)
-		cleanupDone := make(chan int)
-		signal.Notify(signalChan, os.Interrupt)
-		go func() {
-			interrupted := false
-			for {
-				select {
-				case <-signalChan:
-					if interrupted {
-						log.Criticalf("received another interrupt, killing unfinished commands...")
-						opts.ForceStop()
-						continue
-					}
-					interrupted = true
-					log.Criticalf("received an interrupt, stopping unfinished commands...")
-					cancelRun()
-				case <-chExitSignalMonitor:
-					signal.Stop(signalChan)
-					cleanupDone <- 1
-					return
+				if setPointer {
+					pToolExitStatus = &toolExitStatus
+				}
+				if setCode {
+					*pToolExitStatus = childCode
 				}
 			}
+			doneExitStatus <- 1
 		}()
+
+		// ---------------------------------------------------------------
 
 		// the order is very important!
 		<-donePreprocessFiles // finish read data and send command
@@ -473,23 +540,32 @@ Preset variable (macro):
 			opts.ETABar.Finish()
 			os.Stderr.WriteString("\n")
 		}
-		if config.PropExitStatus {
-			<-doneExitStatus
-		}
+		<-doneExitStatus
 		if config.Continue {
 			<-doneCheckSuccCmd
 		}
 
 		close(chExitSignalMonitor)
 		<-cleanupDone
+		cause := state.Cause()
+		if config.Continue && (cause.Kind == runstate.Internal || outputWriteErr != nil || succCmdWriteErr != nil) {
+			// Discard buffered bytes before restoring the exact pre-run length.
+			if rollbackErr := rollbackSuccessfulCommands(bfhSuccCmds, fhSuccCmds, succCmdOriginalSize); rollbackErr != nil {
+				log.Error(errors.Wrap(rollbackErr, "rollback successful-command file"))
+				cause = runstate.Cause{Kind: runstate.Internal, Status: 1}
+			}
+		}
+		if cause.Status != 0 {
+			os.Exit(cause.Status)
+		}
 
-		if config.PropExitStatus {
-			if anyCommands {
-				if pToolExitStatus != nil {
+		if anyCommands {
+			if pToolExitStatus != nil {
+				if *pToolExitStatus == 124 || config.PropExitStatus {
 					os.Exit(*pToolExitStatus)
-				} else {
-					checkError(fmt.Errorf(`did not get an exit status int from any child process)`))
 				}
+			} else {
+				checkError(fmt.Errorf(`did not get an exit status int from any child process)`))
 			}
 		}
 	},
@@ -532,7 +608,7 @@ func init() {
 	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: seconds, 0 for no timeout) (default 0)")
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
-	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop child processes on first error (not perfect, you may stop it by typing ctrl-c or closing terminal)")
+	RootCmd.Flags().BoolP("stop-on-error", "e", false, "stop scheduling and clean up active child processes on first error")
 	RootCmd.Flags().BoolP("propagate-exit-status", "", true, "propagate child exit status up to the exit status of rush")
 	RootCmd.Flags().StringSliceP("no-stop-exes", "", []string{}, "exe names to exclude from stop signal, example: mspdbsrv.exe; or use all for all exes (default none)")
 	RootCmd.Flags().StringSliceP("no-kill-exes", "", []string{}, "exe names to exclude from kill signal, example: mspdbsrv.exe; or use all for all exes (default none)")

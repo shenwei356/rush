@@ -53,7 +53,7 @@ Major:
   ***<s/>sut it does not support multi-line commands, which are common in workflow</s>***)
 - **`awk -v` like custom defined variables** (`-v`). (***Using Shell variable in GNU parallel***)
 - **Keeping output in order of input** (`-k`). (Same `-k/--keep-order` in GNU parallel)
-- **Exit on first error(s)** (`-e`). (*not perfect*, you may stop it by typing ctrl-c or closing terminal) (`--halt 2` in GNU parallel) 
+- **Exit on first error** (`-e`): stop scheduling and clean up active child processes. (`--halt 2` in GNU parallel)
 - **Settable record delimiter** (`-D`, default `\n`). (`--recstart` and `--recend` in GNU parallel)
 - **Settable records sending to every command** (`-n`, default `1`). (`-n/--max-args` in GNU parallel)
 - **Settable field delimiter** (`-d`, default `\s+`). (Same `-d/--delimiter` in GNU parallel)
@@ -540,7 +540,9 @@ Flags:
     Process cleanup differs by platform:
 
     - Linux: rush sends `SIGINT` to every marked child process, waits up to `--cleanup-time`, and then sends `SIGKILL` to any remaining processes using native system calls.
-    - Windows: rush sends `Ctrl+C` and then `Ctrl+Break`, waiting up to `--cleanup-time` after each signal. It finally runs `taskkill /T /F /PID <pid>` to forcefully terminate each remaining process and its child-process tree.
+    - Windows: rush starts each command in a new process group and sends that group a directed `Ctrl+Break`, followed by forced tree cleanup. Windows cannot direct `Ctrl+C` to a child group; a user `Ctrl+C` still makes rush exit with status 130.
+    - Unix `Ctrl+C` exits with status 130 and `SIGTERM` exits with status 143. A command timeout exits with status 124.
+    - Cleanup covers ordinary descendants that remain in the Unix process group or Windows parent/child tree. Processes that deliberately detach, daemonize, create a new console/session, or use Windows breakaway are outside this guarantee.
 
     Press `Ctrl-C` again to skip the remaining cleanup delay and immediately kill unfinished processes.
     Commands that have not started are discarded after the interrupt and are not executed.
