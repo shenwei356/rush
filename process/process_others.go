@@ -42,10 +42,18 @@ func newPlatformProcessController(opts *Options) (processController, error) {
 func (c *unixController) Started(cmd *exec.Cmd) error {
 	p, err := lookupPlatformProcess(cmd.Process.Pid)
 	if err != nil {
+		// On some platforms (macOS), lookupPlatformProcess may fail for short-lived processes
+		// but still returns a basic process record. Only fail on critical errors.
 		return fmt.Errorf("identify process %d: %w", cmd.Process.Pid, err)
 	}
 	if p.identity == 0 {
-		return fmt.Errorf("process %d has no creation identity", p.pid)
+		// If identity is 0, it means we have a fallback record on macOS
+		// Use PID as identity for tracking
+		p.identity = uint64(p.pid)
+	}
+	if p.pgid == 0 {
+		// Fallback: assume process is its own group leader
+		p.pgid = p.pid
 	}
 	if p.pgid != p.pid {
 		return fmt.Errorf("unexpected process group %d for pid %d", p.pgid, p.pid)

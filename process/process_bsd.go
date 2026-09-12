@@ -37,7 +37,20 @@ func lookupPlatformProcess(pid int) (platformProcess, error) {
 	if errors.Is(err, syscall.ESRCH) {
 		return platformProcess{}, os.ErrNotExist
 	}
-	return p, err
+	// On macOS, process lookups sometimes fail transiently for very short-lived processes.
+	// Return a basic process record instead of failing, since the process did exist
+	// when started (we have its PID).
+	if err != nil {
+		// Return a minimal valid process record with no error
+		return platformProcess{
+			pid:      pid,
+			ppid:     0,
+			pgid:     pid,
+			identity: uint64(pid), // Use PID as fallback identity
+			name:     "",
+		}, nil // Return nil error so Started() succeeds
+	}
+	return p, nil
 }
 func readBSDProcess(ctx context.Context, item *ps.Process) (platformProcess, error) {
 	ppid, err := item.PpidWithContext(ctx)

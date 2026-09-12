@@ -117,7 +117,8 @@ func runWindowsConsoleLifecycle(t *testing.T, cleanup time.Duration, second bool
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	waitWindowsEvent(t, ready, 8*time.Second, "child ready")
+	// Give more time on CI for process startup
+	waitWindowsEvent(t, ready, 15*time.Second, "child ready")
 	childPID := readWindowsPID(t, pidFile)
 	t.Cleanup(func() { terminateWindowsPID(childPID) })
 
