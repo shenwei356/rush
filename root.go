@@ -23,6 +23,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -260,7 +261,7 @@ Preset variable (macro):
 
 		// ---------------------------------------------------------------
 
-		state, runCtx := runstate.New(nil)
+		state, runCtx := runstate.New(context.TODO())
 		cancelRun := state.Cancel
 		defer cancelRun()
 

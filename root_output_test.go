@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -72,6 +73,9 @@ func TestBufferedOutputFailureCommandHelper(t *testing.T) {
 }
 
 func TestSuccessfulCommandFileRollsBackOnBufferedOutputFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows: os.CreateTemp uses GetTempPath which has multiple fallbacks, making it hard to force failure")
+	}
 	dir := t.TempDir()
 	successFile := dir + string(os.PathSeparator) + "successful.rush"
 	original := []byte("already complete__CMD__\n")

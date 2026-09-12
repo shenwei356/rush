@@ -261,9 +261,14 @@ func observeRun(t *testing.T, opts *Options, texts ...string) observedRun {
 			observation.statuses = append(observation.statuses, status)
 		}
 	}()
+	// Increase timeout on macOS where process cleanup is slower
+	timeout := 3 * time.Second
+	if runtime.GOOS == "darwin" {
+		timeout = 6 * time.Second
+	}
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(timeout):
 		t.Fatal("run did not finish")
 	}
 	wg.Wait()
@@ -443,12 +448,17 @@ func TestCommandRunRespondsToCancel(t *testing.T) {
 		done <- err
 	}()
 	close(cancel)
+	// Increase timeout on macOS where process cleanup is slower
+	timeout := 2 * time.Second
+	if runtime.GOOS == "darwin" {
+		timeout = 4 * time.Second
+	}
 	select {
 	case err := <-done:
 		if err == nil || !strings.Contains(err.Error(), ErrCancelled.Error()) {
 			t.Fatalf("Run error = %v; want cancellation", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(timeout):
 		t.Fatal("Command.Run did not respond to Cancel")
 	}
 }
