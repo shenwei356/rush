@@ -1,7 +1,6 @@
 # rush -- a cross-platform command-line tool for executing jobs in parallel
 
 [![Built with GoLang](https://img.shields.io/badge/powered_by-go-6362c2.svg?style=flat)](https://golang.org)
-[![Go Report Card](https://goreportcard.com/badge/github.com/shenwei356/rush)](https://goreportcard.com/report/github.com/shenwei356/rush)
 [![Cross-platform](https://img.shields.io/badge/platform-any-ec2eb4.svg?style=flat)](#download)
 [![Latest Version](https://img.shields.io/github/release/shenwei356/rush.svg?style=flat?maxAge=86400)](https://github.com/shenwei356/rush/releases)
 [![Github Releases](https://img.shields.io/github/downloads/shenwei356/rush/latest/total.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases)
@@ -697,7 +696,3 @@ propose new functions or ask for help.
 ## License
 
 [MIT License](https://github.com/shenwei356/rush/blob/master/LICENSE)
-
-## Starchart
-
-<img src="https://starchart.cc/shenwei356/rush.svg" alt="Stargazers over time" style="max-width: 100%">
