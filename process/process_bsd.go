@@ -67,7 +67,8 @@ func readBSDProcess(ctx context.Context, item *ps.Process) (platformProcess, err
 	}
 	pgid, err := syscall.Getpgid(int(item.Pid))
 	if err != nil {
-		return platformProcess{}, err
+		// If we can't get pgid, assume the process is its own group leader
+		pgid = int(item.Pid)
 	}
 	return platformProcess{pid: int(item.Pid), ppid: int(ppid), pgid: pgid, identity: uint64(created), name: name}, nil
 }
