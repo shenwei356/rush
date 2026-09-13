@@ -49,6 +49,7 @@ var ErrCancelled = errors.New("cancelled")
 type Command struct {
 	ID               uint64
 	Cmd              string
+	recordCmd        string
 	Cancel           <-chan struct{}
 	Timeout          time.Duration
 	ctx              context.Context
@@ -69,7 +70,8 @@ type Command struct {
 }
 
 func NewCommand(id uint64, cmdStr string, cancel <-chan struct{}, timeout time.Duration) *Command {
-	return &Command{ID: id, Cmd: strings.TrimLeft(cmdStr, " \t\r\n"), Cancel: cancel, Timeout: timeout, Executed: make(chan int, 2)}
+	cmdStr = strings.TrimLeft(cmdStr, " \t\r\n")
+	return &Command{ID: id, Cmd: cmdStr, recordCmd: cmdStr, Cancel: cancel, Timeout: timeout, Executed: make(chan int, 2)}
 }
 func (c *Command) String() string { return fmt.Sprintf("cmd #%d: %s", c.ID, c.Cmd) }
 
@@ -575,6 +577,17 @@ func (o *Options) stopChildren() {
 	})
 }
 
+// Job keeps the shell command separate from the text recorded by
+// resume/continue features.
+type Job struct {
+	Cmd       string // Cmd is the command text passed to the shell.
+	RecordCmd string // RecordCmd is the stable text recorded after success.
+}
+
+type commandInput interface {
+	string | Job
+}
+
 type runResult struct {
 	command   *Command
 	success   bool
@@ -626,6 +639,16 @@ func Run(opts *Options, cancel chan struct{}, input chan string) (chan *Command,
 }
 
 func Run4OutputContext(opts *Options, ctx context.Context, stop context.CancelFunc, input chan string) (chan string, chan string, chan int, chan int) {
+	return run4OutputContext(opts, ctx, stop, input)
+}
+
+// Run4OutputContextJobs is like Run4OutputContext, but accepts separate
+// successful-command record keys.
+func Run4OutputContextJobs(opts *Options, ctx context.Context, stop context.CancelFunc, input chan Job) (chan string, chan string, chan int, chan int) {
+	return run4OutputContext(opts, ctx, stop, input)
+}
+
+func run4OutputContext[T commandInput](opts *Options, ctx context.Context, stop context.CancelFunc, input chan T) (chan string, chan string, chan int, chan int) {
 	commands, success, commandDone, statuses := runContext(opts, ctx, stop, input)
 	out := make(chan string, max(1, opts.Jobs))
 	done := make(chan int, 1)
@@ -672,7 +695,7 @@ func Run4OutputContext(opts *Options, ctx context.Context, stop context.CancelFu
 	return out, success, done, statuses
 }
 
-func runContext(opts *Options, parent context.Context, stop context.CancelFunc, input chan string) (chan *Command, chan string, chan int, chan int) {
+func runContext[T commandInput](opts *Options, parent context.Context, stop context.CancelFunc, input chan T) (chan *Command, chan string, chan int, chan int) {
 	if opts.Jobs < 1 {
 		opts.Jobs = 1
 	}
@@ -766,14 +789,18 @@ func runContext(opts *Options, parent context.Context, stop context.CancelFunc, 
 					statuses <- result.result.status
 				}
 				if result.result.success && opts.RecordSuccessfulCmd {
-					success <- result.result.command.Cmd
+					recordCmd := result.result.command.recordCmd
+					if recordCmd == "" {
+						recordCmd = result.result.command.Cmd
+					}
+					success <- recordCmd
 				}
 				delete(pending, nextFinalize)
 				nextFinalize++
 			}
 		}
 		for inputOpen || inflight > 0 {
-			var inputCh <-chan string
+			var inputCh <-chan T
 			if inputOpen && !cancelled && inflight < opts.Jobs {
 				inputCh = input
 			}
@@ -790,10 +817,23 @@ func runContext(opts *Options, parent context.Context, stop context.CancelFunc, 
 				cancelled = true
 				inputOpen = false
 				cancelCh = nil
-			case text, open := <-inputCh:
+			case inputValue, open := <-inputCh:
 				if !open {
 					inputOpen = false
 					continue
+				}
+				text := ""
+				recordText := ""
+				switch value := any(inputValue).(type) {
+				case string:
+					text = value
+					recordText = value
+				case Job:
+					text = value.Cmd
+					recordText = value.RecordCmd
+					if recordText == "" {
+						recordText = text
+					}
 				}
 				// A ready input send and cancellation may race in select. Recheck
 				// before launching so queued work never starts after cancellation.
@@ -805,10 +845,10 @@ func runContext(opts *Options, parent context.Context, stop context.CancelFunc, 
 				workers.Add(1)
 				active++
 				inflight++
-				go func(id uint64, text string) {
+				go func(id uint64, text, recordText string) {
 					defer workers.Done()
-					results <- executeWithRetries(ctx, opts, controller, id, text)
-				}(id, text)
+					results <- executeWithRetries(ctx, opts, controller, id, text, recordText)
+				}(id, text, recordText)
 				id++
 			case result := <-resultCh:
 				active--
@@ -862,7 +902,7 @@ func runContext(opts *Options, parent context.Context, stop context.CancelFunc, 
 	return commands, success, done, statuses
 }
 
-func executeWithRetries(ctx context.Context, opts *Options, controller processController, id uint64, text string) runResult {
+func executeWithRetries(ctx context.Context, opts *Options, controller processController, id uint64, text, recordText string) runResult {
 	var parts []outputPart
 	var command *Command
 	finish := func(success bool, status int, outputErr error) runResult {
@@ -871,6 +911,7 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 	}
 	for attempt := 0; attempt <= opts.Retries; attempt++ {
 		command = NewCommand(id, text, ctx.Done(), opts.Timeout)
+		command.recordCmd = recordText
 		command.controller = controller
 		command.dryrun = opts.DryRun
 		ch, err := command.Run(opts, attempt+1)

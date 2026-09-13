@@ -1,6 +1,7 @@
 - rush v0.10.1
     - `--eta`: Fix progress bar incorrectly showing 100% after interruption with `Ctrl+C`. Cancelled commands no longer increment the progress bar.
     - `--eta`: Add "processed jobs" description to clarify that the progress bar shows processed tasks (including both successful and failed commands).
+    - Keep `{#}` stable in `--continue` records when input order changes. [#77](https://github.com/shenwei356/rush/issues/77)
 - rush v0.10.0
     - **Fix hangs and high CPU usage while stopping child processes after `-e/--stop-on-error` or `Ctrl+C`**. [#76](https://github.com/shenwei356/rush/issues/76)
     - Make `Ctrl+C`, `SIGTERM`, timeout, and stop-on-error cancellation deterministic; documented exit statuses are 130, 143, and 124 respectively.

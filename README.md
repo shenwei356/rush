@@ -59,7 +59,8 @@ Major:
 - **Practical replacement strings** (like GNU parallel):
     - `{{}}`, `{}` itself
     - `{{1,}}`, `{1,}`.
-    - `{#}`, job ID. (Same in GNU parallel)
+    - `{#}`, job ID. With `--continue`, its saved form is stable when input order
+      changes. (Same replacement string as GNU parallel.)
     - `{}`, full data. (Same in GNU parallel)
     - `{n}`, `n`th field in delimiter-delimited data. (Same in GNU parallel)
     - Directory and file
@@ -218,6 +219,9 @@ Replacement strings in commands:
   {?}         a value computed as $cpus / $jobs, which can be used as the number of
               threads for each command. This value is dynamically adjusted according
               to the number of jobs (-j/--jobs).
+
+  With --continue, {#} is kept stable in the successful-command file, so changing
+  input order does not rerun otherwise unchanged jobs.
 
   Escaping curly brackets "{}":
     {{}}        {}
@@ -420,8 +424,28 @@ Flags:
 
 1. Job ID, combine fields index and other replacement strings
 
-        $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo job {#}: {2} {2.} {3%:^_1}'
+        $ echo 12 file.txt dir/s_1.fq.gz | rush 'echo "job {#}: {2} {2.} {3%:^_1}"'
         job 1: file.txt file s
+        
+1. Combine `{#}` with `-c/--continue`.
+
+        $ seq 5 | rush 'timeout 3 sh -c "sleep {}; echo \"job {#}: input {}\""' -c
+        job 1: input 1
+        job 2: input 2
+        15:37:10.744 [ERRO] wait cmd #4: timeout 3 sh -c "sleep 4; echo \"job 4: input 4\"": exit status 124
+        15:37:10.744 [ERRO] wait cmd #3: timeout 3 sh -c "sleep 3; echo \"job 3: input 3\"": exit status 124
+        15:37:10.744 [ERRO] wait cmd #5: timeout 3 sh -c "sleep 5; echo \"job 5: input 5\"": exit status 124
+        
+        $ cat successful_cmds.rush 
+        timeout 3 sh -c "sleep 1; echo \"job {#}: input 1\""__CMD__
+        timeout 3 sh -c "sleep 2; echo \"job {#}: input 2\""__CMD__
+        
+        $ seq 5 | rush 'timeout 3 sh -c "sleep {}; echo \"job {#}: input {}\""' -c
+        15:37:16.182 [INFO] ignore cmd: timeout 3 sh -c "sleep 1; echo \"job 1: input 1\""
+        15:37:16.182 [INFO] ignore cmd: timeout 3 sh -c "sleep 2; echo \"job 2: input 2\""
+        15:37:19.186 [ERRO] wait cmd #2: timeout 3 sh -c "sleep 4; echo \"job 4: input 4\"": exit status 124
+        15:37:19.186 [ERRO] wait cmd #1: timeout 3 sh -c "sleep 3; echo \"job 3: input 3\"": exit status 124
+        15:37:19.186 [ERRO] wait cmd #3: timeout 3 sh -c "sleep 5; echo \"job 5: input 5\"": exit status 124
 
 1. Capture submatch using regular expression (`{@regexp}`)
 

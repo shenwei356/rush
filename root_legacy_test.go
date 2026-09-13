@@ -143,6 +143,39 @@ func TestLegacyContinueFileAndMultilineCommands(t *testing.T) {
 	}
 }
 
+func TestLegacyJobNumberPlaceholderWithContinue(t *testing.T) {
+	successFile := t.TempDir() + string(os.PathSeparator) + "successful.rush"
+	command := `echo {#}:{}`
+
+	stdout, stderr, code := runLegacyRush(t, "a\nb\n", nil, "-j", "1", "-c", "-C", successFile, command)
+	if code != 0 || normalizedLines(stdout) != "1:a\n2:b" || stderr != "" {
+		t.Fatalf("first run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	recorded, err := os.ReadFile(successFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(recorded), "echo {#}:a") || strings.Contains(string(recorded), "echo 1:a") {
+		t.Fatalf("successful-command file contains unstable job number: %q", recorded)
+	}
+
+	stdout, stderr, code = runLegacyRush(t, "b\nc\na\n", nil, "-j", "1", "-c", "-C", successFile, command)
+	if code != 0 || normalizedLines(stdout) != "2:c" || strings.Count(stderr, "ignore cmd") != 2 {
+		t.Fatalf("resumed run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestLegacyJobNumberPlaceholderReadsOldContinueFile(t *testing.T) {
+	successFile := t.TempDir() + string(os.PathSeparator) + "successful.rush"
+	if err := os.WriteFile(successFile, []byte("echo 1:a"+endMarkOfCMD), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runLegacyRush(t, "a\n", nil, "-j", "1", "-c", "-C", successFile, "echo {#}:{}")
+	if code != 0 || stdout != "" || strings.Count(stderr, "ignore cmd") != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
 func TestLegacyLargeBufferedOutput(t *testing.T) {
 	const size = (1 << 20) + 33
 	helper := shellQuote(os.Args[0]) + " -test.run=^TestLegacyCommandHelper$"

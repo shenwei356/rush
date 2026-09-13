@@ -110,6 +110,9 @@ Replacement strings in commands:
               threads for each command. This value is dynamically adjusted according
               to the number of jobs (-j/--jobs).
 
+  With --continue, {#} is kept stable in the successful-command file, so changing
+  input order does not rerun otherwise unchanged jobs.
+
   Escaping curly brackets "{}":
     {{}}        {}
     {{1}}       {1}
@@ -295,10 +298,10 @@ Preset variable (macro):
 		donePreprocessFiles := make(chan int)
 
 		// channel of command
-		chCmdStr := make(chan string, 1)
+		chCmdStr := make(chan process.Job, 1)
 
 		// run
-		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4OutputContext(opts, runCtx, cancelRun, chCmdStr)
+		chOutput, chSuccessfulCmd, doneSendOutput, chExitStatus := process.Run4OutputContextJobs(opts, runCtx, cancelRun, chCmdStr)
 
 		doneCheckSuccCmd := make(chan int)
 		var nSuccCmds atomic.Int64
@@ -401,14 +404,22 @@ Preset variable (macro):
 			defer close(chCmdStr)
 			defer close(donePreprocessFiles)
 
-			sendCommand := func(cmdStr string) bool {
+			sendCommand := func(cmdStr, recordCmd string) bool {
 				select {
-				case chCmdStr <- cmdStr:
+				case chCmdStr <- process.Job{Cmd: cmdStr, RecordCmd: recordCmd}:
 					anyCommands = true
 					return true
 				case <-runCtx.Done():
 					return false
 				}
+			}
+			wasSuccessful := func(recordCmd, cmdStr string) bool {
+				if _, ok := succCmds[recordCmd]; ok {
+					return true
+				}
+				// Older successful-command files contain the expanded {#} value.
+				_, ok := succCmds[cmdStr]
+				return ok
 			}
 
 			n := config.NRecords
@@ -416,7 +427,7 @@ Preset variable (macro):
 
 			var records []string
 			records = make([]string, 0, n)
-			var cmdStr string
+			var cmdStr, recordCmd string
 			var runned bool
 			nJobs := (len(inputlines) + n - 1) / n
 			for _, record := range inputlines {
@@ -428,12 +439,18 @@ Preset variable (macro):
 				if len(records) == n {
 					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
 					checkError(errors.Wrap(err, "fill command"))
+					recordCmd = cmdStr
+					if config.Continue {
+						recordCmd, err = fillCommandForContinue(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
+						checkError(errors.Wrap(err, "fill command for continue"))
+					}
 					if config.Escape {
 						cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
+						recordCmd = stringutil.EscapeSymbols(recordCmd, config.EscapeSymbols)
 					}
 					if len(cmdStr) > 0 {
 						if config.Continue {
-							if _, runned = succCmds[cmdStr]; runned {
+							if runned = wasSuccessful(recordCmd, cmdStr); runned {
 								log.Infof("ignore cmd: %s", cmdStr)
 								if opts.ETA {
 									opts.ETABar.Add(1)
@@ -442,12 +459,12 @@ Preset variable (macro):
 								// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 								// bfhSuccCmds.Flush()
 							} else {
-								if !sendCommand(cmdStr) {
+								if !sendCommand(cmdStr, recordCmd) {
 									return
 								}
 							}
 						} else {
-							if !sendCommand(cmdStr) {
+							if !sendCommand(cmdStr, recordCmd) {
 								return
 							}
 						}
@@ -460,22 +477,28 @@ Preset variable (macro):
 			if len(records) > 0 {
 				cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
 				checkError(errors.Wrap(err, "fill command"))
+				recordCmd = cmdStr
+				if config.Continue {
+					recordCmd, err = fillCommandForContinue(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
+					checkError(errors.Wrap(err, "fill command for continue"))
+				}
 				if config.Escape {
 					cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
+					recordCmd = stringutil.EscapeSymbols(recordCmd, config.EscapeSymbols)
 				}
 				if len(cmdStr) > 0 {
 					if config.Continue {
-						if _, runned = succCmds[cmdStr]; runned {
+						if runned = wasSuccessful(recordCmd, cmdStr); runned {
 							log.Infof("ignore cmd: %s", cmdStr)
 							// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 							// bfhSuccCmds.Flush()
 						} else {
-							if !sendCommand(cmdStr) {
+							if !sendCommand(cmdStr, recordCmd) {
 								return
 							}
 						}
 					} else {
-						if !sendCommand(cmdStr) {
+						if !sendCommand(cmdStr, recordCmd) {
 							return
 						}
 					}
