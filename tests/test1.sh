@@ -82,7 +82,7 @@ assert_in_stderr "ERRO"
 assert_equal $(cat $STDERR_FILE | grep "WARN" | wc -l) 10
 assert_equal $(cat $STDERR_FILE | grep "ERRO" | wc -l) 5
 
-# exit on first err 
+# exit on first err
 fn_check_exit_on_first_err() {
     seq 5 | $app 'python jhz.py' -e
 }
@@ -115,8 +115,8 @@ assert_equal $(cat $STDOUT_FILE | grep "asdf" | wc -l) 10
 
 # continue
 fn_check_continue() {
-    seq 1 10 | $app 'echo {}' -c -C t.rush
-    seq 1 10 | $app 'echo {}' -c -C t.rush
+    seq 1 10 | $app 'echo {}' -c -C t.rush --verbose
+    seq 1 10 | $app 'echo {}' -c -C t.rush --verbose
     rm t.rush
 }
 run continue fn_check_continue
@@ -125,9 +125,9 @@ assert_equal $(cat $STDERR_FILE | grep "ignore" | wc -l) 10
 # continue mutli-line cmds
 fn_check_continue() {
     seq 1 10 | $app 'echo {};\
-        echo s{}' -c -C t2.rush
+        echo s{}' -c -C t2.rush --verbose
     seq 1 10 | $app 'echo {};\
-        echo s{}' -c -C t2.rush
+        echo s{}' -c -C t2.rush --verbose
     rm t2.rush
 }
 run continue fn_check_continue
