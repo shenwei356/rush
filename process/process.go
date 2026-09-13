@@ -641,7 +641,10 @@ func Run4OutputContext(opts *Options, ctx context.Context, stop context.CancelFu
 				opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
 			}
 			if opts.ETA {
-				_ = opts.ETABar.Add(1)
+				// Only increment progress bar for commands that were not cancelled
+				if !errors.Is(c.Err, ErrCancelled) {
+					_ = opts.ETABar.Add(1)
+				}
 			}
 		}
 		for c := range commands {

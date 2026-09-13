@@ -382,6 +382,7 @@ Preset variable (macro):
 			}
 			opts.ETABar = pb.NewOptions(jobcount,
 				pb.OptionSetWriter(os.Stderr),
+				pb.OptionSetDescription("processed jobs: "),
 				pb.OptionShowCount(),
 				pb.OptionShowIts(),
 				pb.OptionSetItsString("jobs"),
@@ -537,10 +538,6 @@ Preset variable (macro):
 		<-donePreprocessFiles // finish read data and send command
 		<-doneSendOutput      // finish send output
 		<-doneOutput          // finish print output
-		if opts.ETA {
-			opts.ETABar.Finish()
-			os.Stderr.WriteString("\n")
-		}
 		<-doneExitStatus
 		if config.Continue {
 			<-doneCheckSuccCmd
@@ -549,6 +546,13 @@ Preset variable (macro):
 		close(chExitSignalMonitor)
 		<-cleanupDone
 		cause := state.Cause()
+		if opts.ETA {
+			// Only call Finish() if the run completed normally (not interrupted)
+			if cause.Status == 0 {
+				opts.ETABar.Finish()
+			}
+			os.Stderr.WriteString("\n")
+		}
 		if config.Continue && (cause.Kind == runstate.Internal || outputWriteErr != nil || succCmdWriteErr != nil) {
 			// Discard buffered bytes before restoring the exact pre-run length.
 			if rollbackErr := rollbackSuccessfulCommands(bfhSuccCmds, fhSuccCmds, succCmdOriginalSize); rollbackErr != nil {
