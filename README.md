@@ -297,7 +297,6 @@ Examples:
       sample sample_1.fq.gz sample_2.fq.gz
   13. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
-      [INFO] ignore cmd #1: sleep 1; echo 1
       [ERRO] run cmd #1: sleep 2; echo 2: time out
       [ERRO] run cmd #2: sleep 3; echo 3: time out
   14. escape special symbols
@@ -322,7 +321,8 @@ Flags:
   -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given
                                   by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves
                                   data so we can continue jobs next time; 3) if the file exists, rush
-                                  ignores jobs in it and update the file
+                                  ignores jobs in it and update the file; 4) skipped jobs are silent
+                                  unless --verbose is used
       --dry-run                   print command but not run
   -q, --escape                    escape special symbols like $ which you can customize by flag
                                   -Q/--escape-symbols
@@ -441,8 +441,6 @@ Flags:
         timeout 3 sh -c "sleep 2; echo \"job {#}: input 2\""__CMD__
         
         $ seq 5 | rush 'timeout 3 sh -c "sleep {}; echo \"job {#}: input {}\""' -c
-        15:37:16.182 [INFO] ignore cmd: timeout 3 sh -c "sleep 1; echo \"job 1: input 1\""
-        15:37:16.182 [INFO] ignore cmd: timeout 3 sh -c "sleep 2; echo \"job 2: input 2\""
         15:37:19.186 [ERRO] wait cmd #2: timeout 3 sh -c "sleep 4; echo \"job 4: input 4\"": exit status 124
         15:37:19.186 [ERRO] wait cmd #1: timeout 3 sh -c "sleep 3; echo \"job 3: input 3\"": exit status 124
         15:37:19.186 [ERRO] wait cmd #3: timeout 3 sh -c "sleep 5; echo \"job 5: input 5\"": exit status 124
@@ -586,6 +584,7 @@ Flags:
     or cancelling by user with `Ctrl + C`),
     please switch flag `-c/--continue` on and run again,
     so that `rush` can save successful commands and ignore them in **NEXT** run.
+    Skipped commands are silent by default; use `--verbose` to print each one.
 
         $ seq 1 3 | rush 'sleep {}; echo {}' -t 3 -c
         1
@@ -599,8 +598,6 @@ Flags:
 
         # run again
         $ seq 1 3 | rush 'sleep {}; echo {}' -t 3 -c
-        [INFO] ignore cmd #1: sleep 1; echo 1
-        [INFO] ignore cmd #2: sleep 2; echo 2
         [ERRO] run cmd #1: sleep 3; echo 3: time out
 
     Commands of multi-lines (***Not supported in GNU parallel***)
@@ -623,10 +620,6 @@ Flags:
         # run again
         $ seq 1 3 | rush 'sleep {}; echo {}; \
         echo finish {}' -t 3 -c -C finished.rush
-        [INFO] ignore cmd #1: sleep 1; echo 1; \
-        echo finish 1
-        [INFO] ignore cmd #2: sleep 2; echo 2; \
-        echo finish 2
         [ERRO] run cmd #1: sleep 3; echo 3; \
         echo finish 3: time out
 

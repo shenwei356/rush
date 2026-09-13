@@ -451,7 +451,9 @@ Preset variable (macro):
 					if len(cmdStr) > 0 {
 						if config.Continue {
 							if runned = wasSuccessful(recordCmd, cmdStr); runned {
-								log.Infof("ignore cmd: %s", cmdStr)
+								if config.Verbose {
+									log.Infof("ignore cmd: %s", cmdStr)
+								}
 								if opts.ETA {
 									opts.ETABar.Add(1)
 									fmt.Fprintln(os.Stderr)
@@ -489,7 +491,9 @@ Preset variable (macro):
 				if len(cmdStr) > 0 {
 					if config.Continue {
 						if runned = wasSuccessful(recordCmd, cmdStr); runned {
-							log.Infof("ignore cmd: %s", cmdStr)
+							if config.Verbose {
+								log.Infof("ignore cmd: %s", cmdStr)
+							}
 							// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 							// bfhSuccCmds.Flush()
 						} else {
@@ -646,7 +650,8 @@ func init() {
 	RootCmd.Flags().BoolP("continue", "c", false, `continue jobs.`+
 		` NOTES: 1) successful commands are saved in file (given by flag -C/--succ-cmd-file);`+
 		` 2) if the file does not exist, rush saves data so we can continue jobs next time;`+
-		` 3) if the file exists, rush ignores jobs in it and update the file`)
+		` 3) if the file exists, rush ignores jobs in it and update the file;`+
+		` 4) skipped jobs are silent unless --verbose is used`)
 	RootCmd.Flags().StringP("succ-cmd-file", "C", "successful_cmds.rush", `file for saving successful commands`)
 
 	// RootCmd.Flags().IntP("buffer-size", "", 1, "buffer size for output of a command before saving to tmpfile (unit: Mb)")
@@ -705,7 +710,6 @@ func init() {
       sample sample_1.fq.gz sample_2.fq.gz
   13. save successful commands to continue in NEXT run
       $ seq 1 3 | rush 'sleep {}; echo {}' -c -t 2
-      [INFO] ignore cmd #1: sleep 1; echo 1
       [ERRO] run cmd #1: sleep 2; echo 2: time out
       [ERRO] run cmd #2: sleep 3; echo 3: time out
   14. escape special symbols

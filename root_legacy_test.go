@@ -137,9 +137,27 @@ func TestLegacyContinueFileAndMultilineCommands(t *testing.T) {
 				t.Fatalf("first run stdout=%q (normalized=%q, expected=%q)", stdout, normalized, expectedFirst)
 			}
 		}
-		if run == 2 && (stdout != "" || strings.Count(stderr, "ignore cmd") != 2) {
+		if run == 2 && (stdout != "" || stderr != "") {
 			t.Fatalf("second run stdout=%q stderr=%q", stdout, stderr)
 		}
+	}
+}
+
+func TestLegacyContinueSkipLoggingIsVerboseOnly(t *testing.T) {
+	successFile := t.TempDir() + string(os.PathSeparator) + "successful.rush"
+	stdout, stderr, code := runLegacyRush(t, "a\nb\n", nil, "-j", "1", "-c", "-C", successFile, "echo {}")
+	if code != 0 || normalizedLines(stdout) != "a\nb" || stderr != "" {
+		t.Fatalf("first run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+
+	stdout, stderr, code = runLegacyRush(t, "a\nb\n", nil, "-j", "1", "-c", "-C", successFile, "echo {}")
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("default resume: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+
+	stdout, stderr, code = runLegacyRush(t, "a\nb\n", nil, "-j", "1", "--verbose", "-c", "-C", successFile, "echo {}")
+	if code != 0 || stdout != "" || strings.Count(stderr, "ignore cmd") != 2 {
+		t.Fatalf("verbose resume: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 
@@ -160,7 +178,7 @@ func TestLegacyJobNumberPlaceholderWithContinue(t *testing.T) {
 	}
 
 	stdout, stderr, code = runLegacyRush(t, "b\nc\na\n", nil, "-j", "1", "-c", "-C", successFile, command)
-	if code != 0 || normalizedLines(stdout) != "2:c" || strings.Count(stderr, "ignore cmd") != 2 {
+	if code != 0 || normalizedLines(stdout) != "2:c" || stderr != "" {
 		t.Fatalf("resumed run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
@@ -171,7 +189,7 @@ func TestLegacyJobNumberPlaceholderReadsOldContinueFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, stderr, code := runLegacyRush(t, "a\n", nil, "-j", "1", "-c", "-C", successFile, "echo {#}:{}")
-	if code != 0 || stdout != "" || strings.Count(stderr, "ignore cmd") != 1 {
+	if code != 0 || stdout != "" || stderr != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
