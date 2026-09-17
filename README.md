@@ -57,12 +57,14 @@ Major:
 - **Settable records sending to every command** (`-n`, default `1`). (`-n/--max-args` in GNU parallel)
 - **Settable field delimiter** (`-d`, default `\s+`). (Same `-d/--delimiter` in GNU parallel)
 - **Practical replacement strings** (like GNU parallel):
-    - `{{}}`, `{}` itself
-    - `{{1,}}`, `{1,}`.
-    - `{#}`, job ID. With `--continue`, its saved form is stable when input order
-      changes. (Same replacement string as GNU parallel.)
-    - `{}`, full data. (Same in GNU parallel)
-    - `{n}`, `n`th field in delimiter-delimited data. (Same in GNU parallel)
+    - Input data
+        - `{}`, full data. (Same in GNU parallel)
+        - `{n}`, `n`th field in delimiter-delimited data. (Same in GNU parallel)
+    - Job related
+        - `{#}`, job ID. With `--continue`, its saved form is stable when input order
+        changes. (Same replacement string as GNU parallel.)
+        - `{?}`, threads per job, computed as `max(1, CPUs / jobs)`. With `--continue`,
+        its saved form stays stable when the job count changes. (***Not directly supported in GNU parallel***)
     - Directory and file
         - `{/}`, dirname. (`{//}` in GNU parallel)
         - `{%}`, basename. (`{/}` in GNU parallel)
@@ -75,6 +77,9 @@ Major:
         - `{%.}`, `{%:}`, basename without extension
         - `{2.}`, `{2/}`, `{2%.}`, manipulate `n`th field
         - `{file:}`, `{file:^_1}`, remove all extensions of a preset variable (see below)
+    - Special symbols
+        - `{{}}`, `{}` itself
+        - `{{1,}}`, data containing double quotes `{1,}`.
 - **Preset variable (macro)**, e.g., `rush -v p={^suffix} 'echo {p}_new_suffix'`,
 where `{p}` is replaced with `{^suffix}`. (***Using Shell variable in GNU parallel***)
 
@@ -84,7 +89,8 @@ Minor:
 - Trim input data (`--trim`). (Same in GNU parallel)
 - Verbose output (`--verbose`). (Same in GNU parallel)
 
-[Differences between rush and GNU parallel](https://www.gnu.org/software/parallel/parallel_alternatives.html#DIFFERENCES-BETWEEN-Rush-AND-GNU-Parallel) on GNU parallel site.
+Note that the comparison between rush and GNU parallel might be outdated, as both tools might have improved.
+See [Differences between rush and GNU parallel](https://www.gnu.org/software/parallel/parallel_alternatives.html#DIFFERENCES-BETWEEN-Rush-AND-GNU-Parallel) on GNU parallel site.
 
 ## Performance
 
