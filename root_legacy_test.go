@@ -194,6 +194,78 @@ func TestLegacyJobNumberPlaceholderReadsOldContinueFile(t *testing.T) {
 	}
 }
 
+func TestLegacyThreadsPlaceholderWithContinue(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		command string
+		assign  []string
+	}{
+		{name: "direct", command: "echo {?}:{}"},
+		{name: "preset variable", command: "echo {threads}:{}", assign: []string{"-v", "threads={?}"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			successFile := t.TempDir() + string(os.PathSeparator) + "successful.rush"
+			args := append([]string{"-j", "1", "-c", "-C", successFile}, tt.assign...)
+			args = append(args, tt.command)
+			stdout, stderr, code := runLegacyRush(t, "a\nb\n", nil, args...)
+			want := fmt.Sprintf("%d:a\n%d:b", runtime.NumCPU(), runtime.NumCPU())
+			if code != 0 || normalizedLines(stdout) != want || stderr != "" {
+				t.Fatalf("first run: code=%d stdout=%q stderr=%q; want %q", code, stdout, stderr, want)
+			}
+
+			recorded, err := os.ReadFile(successFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, wantKey := range []string{"echo {?}:a", "echo {?}:b"} {
+				if !strings.Contains(string(recorded), wantKey+endMarkOfCMD) {
+					t.Fatalf("successful-command file does not contain %q: %q", wantKey, recorded)
+				}
+			}
+
+			args = append([]string{"-j", strconv.Itoa(runtime.NumCPU() + 1), "-c", "-C", successFile}, tt.assign...)
+			args = append(args, tt.command)
+			stdout, stderr, code = runLegacyRush(t, "b\nc\na\n", nil, args...)
+			if code != 0 || normalizedLines(stdout) != "1:c" || stderr != "" {
+				t.Fatalf("resumed run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestLegacyDynamicPlaceholdersWithContinue(t *testing.T) {
+	successFile := t.TempDir() + string(os.PathSeparator) + "successful.rush"
+	command := "echo {#}:{?}:{}"
+	stdout, stderr, code := runLegacyRush(t, "a\n", nil, "-j", "1", "-c", "-C", successFile, command)
+	if code != 0 || normalizedLines(stdout) != fmt.Sprintf("1:%d:a", runtime.NumCPU()) || stderr != "" {
+		t.Fatalf("first run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	recorded, err := os.ReadFile(successFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(recorded) != "echo {#}:{?}:a"+endMarkOfCMD {
+		t.Fatalf("successful-command file=%q", recorded)
+	}
+
+	stdout, stderr, code = runLegacyRush(t, "b\na\n", nil, "-j", strconv.Itoa(runtime.NumCPU()+1), "-c", "-C", successFile, command)
+	if code != 0 || normalizedLines(stdout) != "1:1:b" || stderr != "" {
+		t.Fatalf("resumed run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestLegacyThreadsPlaceholderReadsOldContinueFile(t *testing.T) {
+	successFile := t.TempDir() + string(os.PathSeparator) + "successful.rush"
+	oldRecord := fmt.Sprintf("echo %d:a", runtime.NumCPU()) + endMarkOfCMD
+	if err := os.WriteFile(successFile, []byte(oldRecord), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runLegacyRush(t, "a\n", nil, "-j", "1", "-c", "-C", successFile, "echo {?}:{}")
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
 func TestLegacyLargeBufferedOutput(t *testing.T) {
 	const size = (1 << 20) + 33
 	helper := shellQuote(os.Args[0]) + " -test.run=^TestLegacyCommandHelper$"

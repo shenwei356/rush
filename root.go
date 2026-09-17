@@ -110,8 +110,8 @@ Replacement strings in commands:
               threads for each command. This value is dynamically adjusted according
               to the number of jobs (-j/--jobs).
 
-  With --continue, {#} is kept stable in the successful-command file, so changing
-  input order does not rerun otherwise unchanged jobs.
+  With --continue, {#} and {?} are kept stable in the successful-command file,
+  so changing input order or job count does not rerun otherwise unchanged jobs.
 
   Escaping curly brackets "{}":
     {{}}        {}

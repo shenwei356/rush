@@ -36,9 +36,11 @@ var reCharsCheck = regexp.MustCompile(`^(\d+)*.*$`)
 var reVariable = regexp.MustCompile(`^([a-zA-Z][A-Za-z0-9_]*)`)
 
 const continueJobIDMarker = "\x00RUSH_CONTINUE_JOB_ID\x00"
+const continueThreadsMarker = "\x00RUSH_CONTINUE_THREADS\x00"
 
 func fillCommand(config Config, command string, chunk Chunk, NRemainingJobs int) (string, error) {
-	s, err := _fillCommand(config, command, chunk, NRemainingJobs, fmt.Sprintf("%d", chunk.ID))
+	s, err := _fillCommand(config, command, chunk, NRemainingJobs,
+		fmt.Sprintf("%d", chunk.ID), strconv.Itoa(max(runtime.NumCPU()/config.Jobs, 1)))
 	if err != nil {
 		return s, err
 	}
@@ -46,14 +48,15 @@ func fillCommand(config Config, command string, chunk Chunk, NRemainingJobs int)
 }
 
 func fillCommandForContinue(config Config, command string, chunk Chunk, nRemainingJobs int) (string, error) {
-	s, err := _fillCommand(config, command, chunk, nRemainingJobs, continueJobIDMarker)
+	s, err := _fillCommand(config, command, chunk, nRemainingJobs, continueJobIDMarker, continueThreadsMarker)
 	if err != nil {
 		return s, err
 	}
-	return strings.ReplaceAll(s, continueJobIDMarker, "{#}"), nil
+	s = strings.ReplaceAll(s, continueJobIDMarker, "{#}")
+	return strings.ReplaceAll(s, continueThreadsMarker, "{?}"), nil
 }
 
-func _fillCommand(config Config, command string, chunk Chunk, nRemainingJobs int, jobID string) (string, error) {
+func _fillCommand(config Config, command string, chunk Chunk, nRemainingJobs int, jobID, threads string) (string, error) {
 	founds := rePlaceHolder.FindAllStringSubmatchIndex(command, -1)
 	if len(founds) == 0 { // no place holder
 		return command, nil
@@ -197,8 +200,7 @@ func _fillCommand(config Config, command string, chunk Chunk, nRemainingJobs int
 						captureGroup = true
 						break LOOP
 					case "?": // cpus / jobs
-						// target = strconv.Itoa(max(runtime.NumCPU()/min(config.Jobs, nRemainingJobs), 1))
-						target = strconv.Itoa(max(runtime.NumCPU()/config.Jobs, 1))
+						target = threads
 					default:
 						target = fmt.Sprintf("{%s}", chars)
 						break LOOP
@@ -239,5 +241,5 @@ func _fillCommand(config Config, command string, chunk Chunk, nRemainingJobs int
 		return buf.String(), nil
 	}
 	config.GreedyCount--
-	return _fillCommand(config, buf.String(), chunk, nRemainingJobs, jobID)
+	return _fillCommand(config, buf.String(), chunk, nRemainingJobs, jobID, threads)
 }
