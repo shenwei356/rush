@@ -51,6 +51,39 @@ func TestUnixProcessGroupCleanup(t *testing.T) {
 	t.Fatalf("descendant %d is still alive", pid)
 }
 
+func TestUnixProcessGroupCleanupAfterLeaderExits(t *testing.T) {
+	pidFile := t.TempDir() + "/child.pid"
+	command := fmt.Sprintf("trap 'exit 0' INT; sh -c 'trap \"\" INT; exec sleep 30' & echo $! > %q; wait", pidFile)
+	args := []string{"-test.run=^TestRushHelperProcess$", "--", "-j", "1", "-t", "1", "--cleanup-time", "0", command}
+	cmd := exec.Command(os.Args[0], args...)
+	cmd.Env = append(os.Environ(), "RUSH_TEST_HELPER_PROCESS=1")
+	cmd.Stdin = strings.NewReader("x\n")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := waitUnixPIDFile(t, pidFile, 3*time.Second)
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	})
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rush hung after its command leader exited")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("child survived after its command leader exited")
+}
+
 func waitUnixPIDFile(t *testing.T, path string, timeout time.Duration) int {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

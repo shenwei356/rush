@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -124,6 +125,9 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 		defer controller.Close()
 	}
 	command := getCommand(context.Background(), c.Cmd)
+	// A stopped shell may leave a child holding its output pipes open when
+	// process-tree cleanup fails. Bound Wait's pipe draining in that case.
+	command.WaitDelay = 5 * time.Second
 	command.Env = append(os.Environ(), "RUSH_CHILD_GROUP=[rush]")
 	if c.stdin != "" {
 		command.Stdin = strings.NewReader(c.stdin)
@@ -168,6 +172,24 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	}
 	waited := make(chan error, 1)
 	go func() { waited <- command.Wait() }()
+	stopCommand := func(reason error) error {
+		if err := controller.KillCommand(command); err != nil {
+			// The child handle is still ours until Wait completes. Stop it even
+			// when process-tree inspection or signaling fails.
+			var killErr error
+			if allowed, _ := canSendSignal(filepath.Base(command.Path), opts.NoKillExes); allowed {
+				killErr = command.Process.Kill()
+				if errors.Is(killErr, os.ErrProcessDone) {
+					killErr = nil
+				}
+			}
+			if opts.state != nil {
+				opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+			}
+			return errors.Join(reason, fmt.Errorf("stop cmd #%d: %w", c.ID, errors.Join(err, killErr)))
+		}
+		return reason
+	}
 	var timeout <-chan time.Time
 	var timer *time.Timer
 	if c.Timeout > 0 {
@@ -179,19 +201,17 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	select {
 	case waitErr = <-waited:
 	case <-c.Cancel:
-		terminal = ErrCancelled
-		_ = controller.KillCommand(command)
+		terminal = stopCommand(ErrCancelled)
 		waitErr = <-waited
 	case <-c.memoryStop:
 		terminal = ErrMemoryPressure
 		if isClosed(c.Cancel) {
 			terminal = ErrCancelled
 		}
-		_ = controller.KillCommand(command)
+		terminal = stopCommand(terminal)
 		waitErr = <-waited
 	case <-timeout:
-		terminal = ErrTimeout
-		_ = controller.KillCommand(command)
+		terminal = stopCommand(ErrTimeout)
 		waitErr = <-waited
 	}
 	c.exitStatus = command.ProcessState.ExitCode()

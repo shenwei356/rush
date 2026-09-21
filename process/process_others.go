@@ -42,18 +42,18 @@ func newPlatformProcessController(opts *Options) (processController, error) {
 func (c *unixController) Started(cmd *exec.Cmd) error {
 	p, err := lookupPlatformProcess(cmd.Process.Pid)
 	if err != nil {
-		// On some platforms (macOS), lookupPlatformProcess may fail for short-lived processes
-		// but still returns a basic process record. Only fail on critical errors.
-		return fmt.Errorf("identify process %d: %w", cmd.Process.Pid, err)
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("identify process %d: %w", cmd.Process.Pid, err)
+		}
+		// A short-lived shell can exit before inspection. Keep its process
+		// group so a surviving child can still be stopped if necessary.
+		p = platformProcess{pid: cmd.Process.Pid, pgid: cmd.Process.Pid}
 	}
-	if p.identity == 0 {
-		// If identity is 0, it means we have a fallback record on macOS
-		// Use PID as identity for tracking
-		p.identity = uint64(p.pid)
+	if err == nil && p.identity == 0 {
+		return fmt.Errorf("process %d has no creation identity", p.pid)
 	}
 	if p.pgid == 0 {
-		// Fallback: assume process is its own group leader
-		p.pgid = p.pid
+		return fmt.Errorf("process %d has no process group", p.pid)
 	}
 	if p.pgid != p.pid {
 		return fmt.Errorf("unexpected process group %d for pid %d", p.pgid, p.pid)
@@ -107,13 +107,28 @@ func (c *unixController) StopAll(cleanup time.Duration, force <-chan struct{}) e
 
 func (c *unixController) stop(root ProcessRecord, cleanup time.Duration, force <-chan struct{}) error {
 	p, err := validateRootProcess(root)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	known := map[int]platformProcess{p.pid: p}
+	known := make(map[int]platformProcess)
+	if err == nil {
+		known[p.pid] = p
+	} else {
+		// The group may outlive its leader. Its ID cannot be reused while
+		// members remain, so retain the members found before signaling it.
+		all, scanErr := snapshotPlatformProcesses()
+		if scanErr != nil {
+			return scanErr
+		}
+		for pid, member := range all {
+			if member.pgid == root.pgid && !member.zombie {
+				known[pid] = member
+			}
+		}
+		if len(known) == 0 {
+			return nil
+		}
+	}
 	if err := refreshUnixTree(root, known); err != nil {
 		return err
 	}
@@ -213,15 +228,18 @@ func refreshAndCheckUnixTree(root ProcessRecord, known map[int]platformProcess) 
 }
 
 func (c *unixController) signalGraceful(root ProcessRecord, known map[int]platformProcess) error {
+	if allowed, _ := canSendSignal("", c.opts.NoStopExes); !allowed {
+		return nil
+	}
 	if len(c.opts.NoStopExes) == 0 {
-		if _, err := validateRootProcess(root); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil
-			}
+		alive, err := identifiedUnixGroup(root, known)
+		if err != nil {
 			return err
 		}
-		if err := syscall.Kill(-root.pgid, syscall.SIGINT); err != nil && !errors.Is(err, syscall.ESRCH) {
-			return err
+		if alive {
+			if err := syscall.Kill(-root.pgid, syscall.SIGINT); err != nil && !errors.Is(err, syscall.ESRCH) {
+				return err
+			}
 		}
 		for _, p := range known {
 			if p.pgid != root.pgid {
@@ -233,7 +251,14 @@ func (c *unixController) signalGraceful(root ProcessRecord, known map[int]platfo
 		return nil
 	}
 	for _, p := range orderedUnixProcesses(known) {
-		ok, _ := canSendSignal(p.name, c.opts.NoStopExes)
+		name, err := fullPlatformProcessName(p)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("identify executable for pid %d: %w", p.pid, err)
+		}
+		ok, _ := canSendSignal(name, c.opts.NoStopExes)
 		if ok {
 			if err := signalUnixProcess(p, syscall.SIGINT); err != nil {
 				return err
@@ -244,13 +269,18 @@ func (c *unixController) signalGraceful(root ProcessRecord, known map[int]platfo
 }
 
 func (c *unixController) signalForce(root ProcessRecord, known map[int]platformProcess) error {
+	if allowed, _ := canSendSignal("", c.opts.NoKillExes); !allowed {
+		return nil
+	}
 	if len(c.opts.NoKillExes) == 0 {
-		if _, err := validateRootProcess(root); err == nil {
+		alive, err := identifiedUnixGroup(root, known)
+		if err != nil {
+			return err
+		}
+		if alive {
 			if err := syscall.Kill(-root.pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 				return err
 			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
 		}
 		for _, p := range known {
 			if p.pgid != root.pgid {
@@ -262,7 +292,14 @@ func (c *unixController) signalForce(root ProcessRecord, known map[int]platformP
 		return nil
 	}
 	for _, p := range orderedUnixProcesses(known) {
-		ok, _ := canSendSignal(p.name, c.opts.NoKillExes)
+		name, err := fullPlatformProcessName(p)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("identify executable for pid %d: %w", p.pid, err)
+		}
+		ok, _ := canSendSignal(name, c.opts.NoKillExes)
 		if ok {
 			if err := signalUnixProcess(p, syscall.SIGKILL); err != nil {
 				return err
@@ -270,6 +307,30 @@ func (c *unixController) signalForce(root ProcessRecord, known map[int]platformP
 		}
 	}
 	return nil
+}
+
+func identifiedUnixGroup(root ProcessRecord, known map[int]platformProcess) (bool, error) {
+	if _, err := validateRootProcess(root); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	for _, member := range known {
+		if member.pid == root.pid || member.pgid != root.pgid {
+			continue
+		}
+		current, err := lookupPlatformProcess(member.pid)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if current.identity == member.identity && current.pgid == root.pgid && !current.zombie {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func orderedUnixProcesses(known map[int]platformProcess) []platformProcess {

@@ -1,7 +1,11 @@
 #!/bin/bash
 set -e
 
-test -e ssshtest || wget -q https://raw.githubusercontent.com/ryanlayer/ssshtest/master/ssshtest
+ssshtest_revision=fd3155a7afb39e9bbb77117c2033b4e7a3114579
+ssshtest_sha256=035faff9089dec23990fee55426fb0851b7686c7e5a7eb7623b4992215e7ba20
+test -e ssshtest || curl --fail --location --silent --show-error --retry 3 \
+    -o ssshtest "https://raw.githubusercontent.com/ryanlayer/ssshtest/$ssshtest_revision/ssshtest"
+printf '%s  %s\n' "$ssshtest_sha256" ssshtest | sha256sum --check --status
 
 app=${RUSH_TEST_BIN:-./rush}
 go build -o "$app"

@@ -4,10 +4,20 @@ package process
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
+	ps "github.com/shirou/gopsutil/process"
 	"golang.org/x/sys/unix"
 )
+
+var darwinProcessName = func(ctx context.Context, pid int) (string, error) {
+	return (&ps.Process{Pid: int32(pid)}).NameWithContext(ctx)
+}
 
 func snapshotPlatformProcesses() (map[int]platformProcess, error) {
 	items, err := unix.SysctlKinfoProcSlice("kern.proc.all")
@@ -49,4 +59,30 @@ func darwinProcess(item *unix.KinfoProc) platformProcess {
 		name:     string(bytes.TrimRight(item.Proc.P_comm[:], "\x00")),
 		zombie:   item.Proc.P_stat == 5, // SZOMB in sys/proc.h
 	}
+}
+
+func fullPlatformProcessName(p platformProcess) (string, error) {
+	if len(p.name) < 16 {
+		return p.name, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	name, err := darwinProcessName(ctx, p.pid)
+	if err != nil {
+		if _, lookupErr := lookupPlatformProcess(p.pid); errors.Is(lookupErr, os.ErrNotExist) {
+			return "", os.ErrNotExist
+		}
+		return "", err
+	}
+	current, err := lookupPlatformProcess(p.pid)
+	if err != nil {
+		return "", err
+	}
+	if current.identity != p.identity {
+		return "", fmt.Errorf("process identity changed for pid %d", p.pid)
+	}
+	if name == "" {
+		return "", fmt.Errorf("empty executable name for pid %d", p.pid)
+	}
+	return filepath.Base(name), nil
 }
