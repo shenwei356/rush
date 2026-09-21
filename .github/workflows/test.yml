@@ -20,6 +20,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
+      - if: runner.os == 'Linux'
+        shell: bash
+        run: bash tests/test1.sh
       - if: runner.os == 'Windows'
         shell: pwsh
         run: go test ./... -run 'TestWindows'

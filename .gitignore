@@ -10,5 +10,8 @@ doc/site*
 *ssshtest
 t
 .claude
+.codex*
 successful_cmds.rush
+
+__pycache__
 *.pyc

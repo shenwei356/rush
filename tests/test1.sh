@@ -3,8 +3,8 @@ set -e
 
 test -e ssshtest || wget -q https://raw.githubusercontent.com/ryanlayer/ssshtest/master/ssshtest
 
-go build -o rush
-app=./rush
+app=${RUSH_TEST_BIN:-./rush}
+go build -o "$app"
 
 . ssshtest
 set +e
@@ -74,7 +74,7 @@ assert_equal $(cat $STDOUT_FILE | sed 's/ //g' | tr -d '\n') "job1123dir/file.tx
 
 # retry
 fn_check_retry() {
-    seq 5 | $app 'python jhz.py' -r 2
+    seq 5 | $app 'exit 2' -r 2
 }
 run retry fn_check_retry
 assert_no_stdout
@@ -84,7 +84,7 @@ assert_equal $(cat $STDERR_FILE | grep "ERRO" | wc -l) 5
 
 # exit on first err
 fn_check_exit_on_first_err() {
-    seq 5 | $app 'python jhz.py' -e
+    seq 5 | $app 'exit 2' -e
 }
 run check_exit_on_first_err fn_check_exit_on_first_err
 assert_exit_code 2

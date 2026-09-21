@@ -180,6 +180,40 @@ func TestMemoryPressureRequeuesWithoutConsumingRetries(t *testing.T) {
 	}
 }
 
+func TestMemoryPressureWaitsForSelectedJobToStop(t *testing.T) {
+	oldMemory, oldPoll := availableMemory, resourcePollInterval
+	availableMemory = func() (uint64, uint64, error) { return 40, 400, nil }
+	resourcePollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { availableMemory, resourcePollInterval = oldMemory, oldPoll })
+
+	state, ctx := runstate.New(context.Background())
+	defer state.Cancel()
+	gate := newStartGate(ctx, &Options{MinFreeMemory: 100}, state)
+	defer gate.close()
+	older := &Command{memoryStop: make(chan struct{})}
+	younger := &Command{memoryStop: make(chan struct{})}
+	gate.activeMu.Lock()
+	gate.active = []*Command{older, younger}
+	gate.activeMu.Unlock()
+
+	select {
+	case <-younger.memoryStop:
+	case <-time.After(time.Second):
+		t.Fatal("youngest job was not selected")
+	}
+	select {
+	case <-older.memoryStop:
+		t.Fatal("older job was stopped while youngest was still active")
+	case <-time.After(5 * resourcePollInterval):
+	}
+	gate.finished(younger)
+	select {
+	case <-older.memoryStop:
+	case <-time.After(time.Second):
+		t.Fatal("older job was not selected after youngest finished")
+	}
+}
+
 func TestCancellationAfterMemoryRequeue(t *testing.T) {
 	recorded := recordStarts(t, true)
 	oldMemory, oldPoll := availableMemory, resourcePollInterval

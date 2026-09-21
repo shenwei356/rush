@@ -173,9 +173,9 @@ And then:
 #### Method 3: Compiling from source
 
     # download Go from https://go.dev/dl
-    wget https://go.dev/dl/go1.25.5.linux-amd64.tar.gz
+    wget https://go.dev/dl/go1.25.14.linux-amd64.tar.gz
     
-    tar -zxf go1.25.5.linux-amd64.tar.gz -C $HOME/
+    tar -zxf go1.25.14.linux-amd64.tar.gz -C $HOME/
     
     # or 
     #   echo "export PATH=$PATH:$HOME/go/bin" >> ~/.bashrc

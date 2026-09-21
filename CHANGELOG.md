@@ -1,12 +1,12 @@
 - rush v0.11.0
-    - Add a repository-hosted Scoop bucket for Windows builds and update its hashes automatically after stable releases. [#67](https://github.com/shenwei356/rush/issues/67)
     - **Add `--delay`, `--load`, and `--memfree` to stagger job starts and limit starts by system load or available memory**. Under severe memory pressure, stop and retry the youngest job without using its retry allowance. [#65](https://github.com/shenwei356/rush/issues/65)
     - **Add `--pipe` to send each `-n` record batch to the command's standard input**, preserving terminating record delimiters and replaying the batch for retries. `--continue` distinguishes batches by their input digest. [#22](https://github.com/shenwei356/rush/issues/22)
-    - `--eta`: Fix progress bar incorrectly showing 100% after interruption with `Ctrl+C`. Cancelled commands no longer increment the progress bar.
-    - `--eta`: Add "processed jobs" description to clarify that the progress bar shows processed tasks (including both successful and failed commands).
     - **Keep `{#}` stable in `--continue` records when input order changes**. [#77](https://github.com/shenwei356/rush/issues/77)
     - **Keep `{?}` stable in `--continue` records when the job count or available CPU count changes**. [#74](https://github.com/shenwei356/rush/issues/74)
     - Suppress per-command `--continue` skip logs by default; use `--verbose` to show them. [#78](https://github.com/shenwei356/rush/issues/78)
+    - `--eta`: Fix progress bar incorrectly showing 100% after interruption with `Ctrl+C`. Cancelled commands no longer increment the progress bar.
+    - `--eta`: Add "processed jobs" description to clarify that the progress bar shows processed tasks (including both successful and failed commands).
+    - Add a repository-hosted Scoop bucket for Windows builds and update its hashes automatically after stable releases. [#67](https://github.com/shenwei356/rush/issues/67)
 - rush v0.10.0
     - **Fix hangs and high CPU usage while stopping child processes after `-e/--stop-on-error` or `Ctrl+C`**. [#76](https://github.com/shenwei356/rush/issues/76)
     - Make `Ctrl+C`, `SIGTERM`, timeout, and stop-on-error cancellation deterministic; documented exit statuses are 130, 143, and 124 respectively.

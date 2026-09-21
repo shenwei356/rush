@@ -129,15 +129,16 @@ func (g *startGate) start(c *Command, cmd *exec.Cmd, controller processControlle
 		return fmt.Errorf("start cmd #%d: %s: %w", c.ID, c.Cmd, err)
 	}
 	g.lastStart = time.Now()
-	if err := controller.Started(cmd); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return fmt.Errorf("register cmd #%d: %w", c.ID, err)
-	}
 	if g.minMemory > 0 {
 		g.activeMu.Lock()
 		g.active = append(g.active, c)
 		g.activeMu.Unlock()
+	}
+	if err := controller.Started(cmd); err != nil {
+		g.finished(c)
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("register cmd #%d: %w", c.ID, err)
 	}
 	return nil
 }
@@ -178,6 +179,17 @@ func (g *startGate) monitorMemory() {
 			continue
 		}
 		g.activeMu.Lock()
+		stopping := false
+		for _, active := range g.active {
+			if active.memoryStopped {
+				stopping = true
+				break
+			}
+		}
+		if stopping {
+			g.activeMu.Unlock()
+			continue
+		}
 		for i := len(g.active) - 1; i >= 0; i-- {
 			if g.active[i].stopForMemory() {
 				break

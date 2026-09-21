@@ -1,4 +1,4 @@
-//go:build darwin || freebsd || openbsd
+//go:build freebsd || openbsd
 
 package process
 

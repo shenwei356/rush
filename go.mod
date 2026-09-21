@@ -1,6 +1,6 @@
 module github.com/shenwei356/rush
 
-go 1.26.0
+go 1.25.14
 
 require (
 	github.com/mattn/go-colorable v0.1.15
