@@ -1,4 +1,6 @@
 - rush v0.11.0
+    - Add a repository-hosted Scoop bucket for Windows builds and update its hashes automatically after stable releases. [#67](https://github.com/shenwei356/rush/issues/67)
+    - **Add `--delay`, `--load`, and `--memfree` to stagger job starts and limit starts by system load or available memory**. Under severe memory pressure, stop and retry the youngest job without using its retry allowance. [#65](https://github.com/shenwei356/rush/issues/65)
     - **Add `--pipe` to send each `-n` record batch to the command's standard input**, preserving terminating record delimiters and replaying the batch for retries. `--continue` distinguishes batches by their input digest. [#22](https://github.com/shenwei356/rush/issues/22)
     - `--eta`: Fix progress bar incorrectly showing 100% after interruption with `Ctrl+C`. Cancelled commands no longer increment the progress bar.
     - `--eta`: Add "processed jobs" description to clarify that the progress bar shows processed tasks (including both successful and failed commands).

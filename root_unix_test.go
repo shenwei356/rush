@@ -68,6 +68,30 @@ func TestInterruptExits(t *testing.T) {
 	}
 }
 
+func TestInterruptDuringStartDelayExits(t *testing.T) {
+	startedFile := t.TempDir() + "/started"
+	cmd := rushTestCommand(t, "1\n2\n", "-j", "2", "--delay", "30", "--cleanup-time", "0", fmt.Sprintf("echo {} >> %q", startedFile))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitForFile(t, startedFile, 2*time.Second)
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatal(err)
+	}
+	waitForStartedRush(t, cmd, 5*time.Second)
+	if code := cmd.ProcessState.ExitCode(); code != 130 {
+		t.Fatalf("exit code: %d; want 130\nstderr:\n%s", code, cmd.Stderr)
+	}
+	data, err := os.ReadFile(startedFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Count(string(data), "\n"); lines != 1 {
+		t.Fatalf("started commands=%d; want 1", lines)
+	}
+}
+
 func TestInterruptKillsChildAndSkipsQueuedCommand(t *testing.T) {
 	testDir := t.TempDir()
 	pidFile := testDir + "/child.pid"

@@ -46,6 +46,8 @@ Major:
   (`--line-buffer` in GNU parallel)
 - **Timeout** (`-t`), terminating the timed-out command and its child-process tree. (`--timeout` in GNU parallel)
 - **Retry** (`-r`). (`--retry-failed --joblog` in GNU parallel)
+- **Start and resource limits**: `--delay`, `--load`, and `--memfree` stagger new jobs
+  and wait for available system capacity.
 - **Safe exit after capturing Ctrl-C**: Linux uses native `SIGINT`/`SIGKILL` signals;
   Windows uses `Ctrl+C`/`Ctrl+Break` followed by `taskkill /T /F` to terminate the process tree.
 - **Continue** (`-c`). (`--resume --joblog` in GNU parallel,
@@ -115,6 +117,15 @@ Note that speed is not the #.1 target, especially for processes that last long.
 Or use [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html), which is faster.
 
     mamba install -c conda-forge rush
+
+#### Windows: Scoop
+
+Add the [rush Scoop bucket](https://github.com/shenwei356/rush/tree/master/bucket) and install the published Windows build:
+
+    scoop bucket add rush https://github.com/shenwei356/rush
+    scoop install rush/rush
+
+Scoop selects the 32-bit, 64-bit, or ARM64 binary for your system. The bucket manifest is updated automatically after a stable release is published with all three Windows archives. To get the new version, run `scoop update` followed by `scoop update rush`.
 
 #### Method 1: Download binaries
 
@@ -331,6 +342,7 @@ Flags:
                                   data so we can continue jobs next time; 3) if the file exists, rush
                                   ignores jobs in it and update the file; 4) skipped jobs are silent
                                   unless --verbose is used
+      --delay float              minimum seconds between starting jobs (supports fractions)
       --dry-run                   print command but not run
   -q, --escape                    escape special symbols like $ which you can customize by flag
                                   -Q/--escape-symbols
@@ -342,6 +354,9 @@ Flags:
   -i, --infile strings            input data file, multi-values supported
   -j, --jobs int                  run n jobs in parallel (default value depends on your device) (default 16)
   -k, --keep-order                keep output in order of input
+      --load string              start jobs only while system load is below this value (number or
+                                  percent of CPUs)
+      --memfree string           minimum available memory before starting jobs (bytes or K/M/G/T/P suffix)
       --no-kill-exes strings      exe names to exclude from kill signal, example: mspdbsrv.exe; or use
                                   all for all exes (default none)
       --no-stop-exes strings      exe names to exclude from stop signal, example: mspdbsrv.exe; or use
@@ -365,6 +380,24 @@ Flags:
   -V, --version                   print version information and check for update
 
 ```
+
+`--delay` sets the minimum interval between process starts in seconds, for example
+`--delay 0.5`. `--load 100%` allows a new job only when the system's one-minute
+load average is below the number of CPUs; a number such as `--load 4` sets an
+absolute threshold. `--memfree 1G` waits until at least 1 GiB of physical memory
+is available. Uppercase size suffixes use powers of 1024, and lowercase suffixes
+use powers of 1000. These limits apply to starts and retries; `-j` still caps
+the number of concurrent jobs.
+
+If available memory falls below half the `--memfree` threshold, rush stops the
+youngest running job and places it back in the queue. Its buffered standard
+output is discarded; standard error already written may remain visible. This
+restart does not use one of its `-r/--retries` attempts.
+On Windows, the load average is estimated from the processor queue and may
+initially read as zero. Resource checks use system-wide values, so memory
+limits imposed on a container may differ from the reported available memory.
+
+    seq 10 | rush -j 4 --delay 0.5 --load 100% --memfree 1G 'run-test {}'
 
 
 ## Examples

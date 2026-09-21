@@ -1,0 +1,49 @@
+name: update Scoop manifest
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable release tag to update the Scoop manifest from
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-scoop-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Download published Windows builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/scoop-assets"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'rush_windows_*.exe.tar.gz' --dir "$RUNNER_TEMP/scoop-assets"
+      - name: Update manifest hashes
+        run: python3 scripts/update_scoop_manifest.py "$RELEASE_TAG" "$RUNNER_TEMP/scoop-assets"
+      - name: Commit manifest
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if git diff --quiet -- bucket/rush.json; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bucket/rush.json
+          git commit -m "Update Scoop manifest for $RELEASE_TAG"
+          git push origin "HEAD:$DEFAULT_BRANCH"

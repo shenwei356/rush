@@ -1,6 +1,7 @@
 *.directory
 .brename_detail.txt
 rush*
+!bucket/rush.json
 binaries
 t.*
 pprof
@@ -10,3 +11,4 @@ doc/site*
 t
 .claude
 successful_cmds.rush
+*.pyc

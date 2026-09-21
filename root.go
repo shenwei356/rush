@@ -238,6 +238,9 @@ Preset variable (macro):
 			NoStopExes:       config.NoStopExes,
 			NoKillExes:       config.NoKillExes,
 			CleanupTime:      time.Duration(config.CleanupTime) * time.Second,
+			StartDelay:       config.StartDelay,
+			MaxLoad:          config.MaxLoad,
+			MinFreeMemory:    config.MinFreeMemory,
 			// Always collect statuses here so timeout retains its documented 124
 			// even when ordinary child-status propagation is disabled.
 			PropExitStatus:      true,
@@ -675,6 +678,9 @@ func init() {
 	RootCmd.Flags().BoolP("eta", "", false, `show ETA progress bar`)
 
 	RootCmd.Flags().IntP("jobs", "j", runtime.NumCPU(), "run n jobs in parallel (default value depends on your device)")
+	RootCmd.Flags().Float64("delay", 0, "minimum seconds between starting jobs (supports fractions)")
+	RootCmd.Flags().String("load", "", "start jobs only while system load is below this value (number or percent of CPUs)")
+	RootCmd.Flags().String("memfree", "", "minimum available memory before starting jobs (bytes or K/M/G/T/P suffix)")
 	RootCmd.Flags().StringP("out-file", "o", "-", `out file ("-" for stdout)`)
 
 	RootCmd.Flags().StringSliceP("infile", "i", []string{}, "input data file, multi-values supported")
@@ -813,8 +819,11 @@ type Config struct {
 	Version bool
 	ETA     bool
 
-	Jobs    int
-	OutFile string
+	Jobs          int
+	StartDelay    time.Duration
+	MaxLoad       float64
+	MinFreeMemory uint64
+	OutFile       string
 
 	Infiles []string
 
@@ -879,14 +888,23 @@ func getConfigs(cmd *cobra.Command) Config {
 			checkError(fmt.Errorf(`illegal value for flag -v/--assign (format: "var=value", type "rush -h" for more details): %s`, s))
 		}
 	}
+	startDelay, err := parseStartDelay(getFlagNonNegativeFloat64(cmd, "delay"))
+	checkError(err)
+	maxLoad, err := parseMaxLoad(getFlagString(cmd, "load"), runtime.NumCPU())
+	checkError(err)
+	minFreeMemory, err := parseMemorySize(getFlagString(cmd, "memfree"))
+	checkError(err)
 
 	return Config{
 		Verbose: getFlagBool(cmd, "verbose"),
 		Version: getFlagBool(cmd, "version"),
 		ETA:     getFlagBool(cmd, "eta"),
 
-		Jobs:    getFlagPositiveInt(cmd, "jobs"),
-		OutFile: getFlagString(cmd, "out-file"),
+		Jobs:          getFlagPositiveInt(cmd, "jobs"),
+		StartDelay:    startDelay,
+		MaxLoad:       maxLoad,
+		MinFreeMemory: minFreeMemory,
+		OutFile:       getFlagString(cmd, "out-file"),
 
 		Infiles: getFlagStringSlice(cmd, "infile"),
 

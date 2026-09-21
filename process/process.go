@@ -45,6 +45,7 @@ func init() {
 
 var ErrTimeout = errors.New("time out")
 var ErrCancelled = errors.New("cancelled")
+var ErrMemoryPressure = errors.New("stopped for low memory")
 
 type Command struct {
 	ID               uint64
@@ -68,6 +69,8 @@ type Command struct {
 	exitStatus       int
 	Executed         chan int
 	controller       processController
+	memoryStop       chan struct{}
+	memoryStopped    bool // guarded by startGate.activeMu
 }
 
 func NewCommand(id uint64, cmdStr string, cancel <-chan struct{}, timeout time.Duration) *Command {
@@ -75,6 +78,15 @@ func NewCommand(id uint64, cmdStr string, cancel <-chan struct{}, timeout time.D
 	return &Command{ID: id, Cmd: cmdStr, recordCmd: cmdStr, Cancel: cancel, Timeout: timeout, Executed: make(chan int, 2)}
 }
 func (c *Command) String() string { return fmt.Sprintf("cmd #%d: %s", c.ID, c.Cmd) }
+
+func (c *Command) stopForMemory() bool {
+	if c.memoryStop == nil || c.memoryStopped {
+		return false
+	}
+	c.memoryStopped = true
+	close(c.memoryStop)
+	return true
+}
 
 func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	ch := make(chan string, 1)
@@ -126,19 +138,34 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 		stderr = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.ErrFileHandle}
 		command.Stdout, command.Stderr = spill, stderr
 	}
-	if err := command.Start(); err != nil {
-		close(ch)
-		completeOutput(nil)
-		return ch, fmt.Errorf("start cmd #%d: %s: %w", c.ID, c.Cmd, err)
+	var startErr error
+	if opts.gate != nil {
+		if opts.MinFreeMemory > 0 {
+			c.memoryStop = make(chan struct{})
+		}
+		startErr = opts.gate.start(c, command, controller)
+	} else {
+		startErr = command.Start()
+		if startErr == nil {
+			startErr = controller.Started(command)
+			if startErr != nil {
+				_ = command.Process.Kill()
+				_ = command.Wait()
+			}
+		}
 	}
-	if err := controller.Started(command); err != nil {
-		_ = command.Process.Kill()
-		_ = command.Wait()
+	if startErr != nil {
 		close(ch)
 		completeOutput(nil)
-		return ch, fmt.Errorf("register cmd #%d: %w", c.ID, err)
+		close(c.Executed)
+		c.exitStatus = 1
+		c.Err = fmt.Errorf("start cmd #%d: %w", c.ID, startErr)
+		return ch, c.Err
 	}
 	defer controller.Finished(command)
+	if opts.gate != nil {
+		defer opts.gate.finished(c)
+	}
 	waited := make(chan error, 1)
 	go func() { waited <- command.Wait() }()
 	var timeout <-chan time.Time
@@ -153,6 +180,13 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	case waitErr = <-waited:
 	case <-c.Cancel:
 		terminal = ErrCancelled
+		_ = controller.KillCommand(command)
+		waitErr = <-waited
+	case <-c.memoryStop:
+		terminal = ErrMemoryPressure
+		if isClosed(c.Cancel) {
+			terminal = ErrCancelled
+		}
 		_ = controller.KillCommand(command)
 		waitErr = <-waited
 	case <-timeout:
@@ -544,6 +578,9 @@ type Options struct {
 	NoStopExes          []string
 	NoKillExes          []string
 	CleanupTime         time.Duration
+	StartDelay          time.Duration
+	MaxLoad             float64
+	MinFreeMemory       uint64
 	PropExitStatus      bool
 	RecordSuccessfulCmd bool
 	Verbose             bool
@@ -553,6 +590,7 @@ type Options struct {
 	forceStopOnce       sync.Once
 	forceStop           chan struct{}
 	controller          processController
+	gate                *startGate
 	state               *runstate.State
 }
 
@@ -598,6 +636,14 @@ type runResult struct {
 	success   bool
 	status    int
 	outputErr error
+	retry     *runTask
+}
+
+type runTask struct {
+	id                  uint64
+	text, record, stdin string
+	attempt             int
+	parts               []outputPart
 }
 
 type outputPart struct {
@@ -719,6 +765,10 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 	opts.state = state
 	controller, controllerErr := makeProcessController(opts)
 	opts.controller = controller
+	opts.gate = nil
+	if opts.StartDelay > 0 || opts.MaxLoad > 0 || opts.MinFreeMemory > 0 {
+		opts.gate = newStartGate(ctx, opts, state)
+	}
 	commands := make(chan *Command, opts.Jobs)
 	success := make(chan string, opts.Jobs)
 	done := make(chan int, 1)
@@ -739,6 +789,9 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 	outputCompletions := make(chan outputCompletion, opts.Jobs)
 	go func() {
 		defer func() { done <- 1; close(done) }()
+		if opts.gate != nil {
+			defer opts.gate.close()
+		}
 		if controllerErr != nil {
 			state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
 			if controller != nil {
@@ -756,6 +809,7 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 		id := uint64(1)
 		active := 0
 		inflight := 0
+		var retryQueue []*runTask
 		awaitingOutput := 0
 		inputOpen := true
 		cancelled := false
@@ -804,9 +858,39 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 				nextFinalize++
 			}
 		}
-		for inputOpen || inflight > 0 {
+		startTask := func(task *runTask) {
+			workers.Add(1)
+			active++
+			inflight++
+			go func() {
+				defer workers.Done()
+				results <- executeWithRetries(ctx, opts, controller, task)
+			}()
+		}
+		for inputOpen || inflight > 0 || len(retryQueue) > 0 {
+			if len(retryQueue) > 0 && inflight < opts.Jobs && !cancelled && ctx.Err() == nil {
+				task := retryQueue[0]
+				retryQueue[0] = nil
+				retryQueue = retryQueue[1:]
+				startTask(task)
+				continue
+			}
+			if ctx.Err() != nil && len(retryQueue) > 0 {
+				for _, task := range retryQueue {
+					for _, part := range task.parts {
+						for range part.ch {
+						}
+						<-part.done
+						_ = part.command.Cleanup()
+					}
+				}
+				retryQueue = nil
+			}
+			if !inputOpen && inflight == 0 && len(retryQueue) == 0 {
+				break
+			}
 			var inputCh <-chan T
-			if inputOpen && !cancelled && inflight < opts.Jobs {
+			if inputOpen && !cancelled && inflight < opts.Jobs && len(retryQueue) == 0 {
 				inputCh = input
 			}
 			var resultCh <-chan runResult
@@ -849,16 +933,15 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 					inputOpen = false
 					continue
 				}
-				workers.Add(1)
-				active++
-				inflight++
-				go func(id uint64, text, recordText, stdin string) {
-					defer workers.Done()
-					results <- executeWithRetries(ctx, opts, controller, id, text, recordText, stdin)
-				}(id, text, recordText, stdin)
+				startTask(&runTask{id: id, text: text, record: recordText, stdin: stdin})
 				id++
 			case result := <-resultCh:
 				active--
+				if result.retry != nil {
+					inflight--
+					retryQueue = append(retryQueue, result.retry)
+					continue
+				}
 				sequence := nextSequence
 				nextSequence++
 				supervised := &supervisedResult{result: result}
@@ -909,25 +992,43 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 	return commands, success, done, statuses
 }
 
-func executeWithRetries(ctx context.Context, opts *Options, controller processController, id uint64, text, recordText, stdin string) runResult {
-	var parts []outputPart
+func executeWithRetries(ctx context.Context, opts *Options, controller processController, task *runTask) runResult {
 	var command *Command
 	finish := func(success bool, status int, outputErr error) runResult {
-		command.Ch, command.outputDone = combineCommandOutputs(parts)
+		command.Ch, command.outputDone = combineCommandOutputs(task.parts)
 		return runResult{command: command, success: success, status: status, outputErr: outputErr}
 	}
-	for attempt := 0; attempt <= opts.Retries; attempt++ {
-		command = NewCommand(id, text, ctx.Done(), opts.Timeout)
-		command.recordCmd = recordText
-		command.stdin = stdin
+	for attempt := task.attempt; attempt <= opts.Retries; attempt++ {
+		command = NewCommand(task.id, task.text, ctx.Done(), opts.Timeout)
+		command.recordCmd = task.record
+		command.stdin = task.stdin
 		command.controller = controller
 		command.dryrun = opts.DryRun
 		ch, err := command.Run(opts, attempt+1)
+		if errors.Is(err, ErrMemoryPressure) && command.outputErr != nil {
+			opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+		}
+		if errors.Is(err, ErrMemoryPressure) && ctx.Err() == nil && command.outputErr == nil {
+			// A memory stop is independent of the user's retry budget. Discard
+			// its partial output before putting the same logical job back.
+			for range ch {
+			}
+			if outputErr := <-command.outputDone; outputErr != nil {
+				opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+				return finish(false, 1, outputErr)
+			}
+			if cleanupErr := command.Cleanup(); cleanupErr != nil {
+				opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+				return finish(false, 1, cleanupErr)
+			}
+			task.attempt = attempt
+			return runResult{retry: task}
+		}
 		if command.outputErr != nil {
 			if err != nil {
 				Log.Error(err)
 			}
-			parts = append(parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: opts.PrintRetryOutput || attempt == opts.Retries})
+			task.parts = append(task.parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: opts.PrintRetryOutput || attempt == opts.Retries})
 			status := command.exitStatus
 			if status == 0 {
 				status = 1
@@ -939,10 +1040,10 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 			return finish(false, status, command.outputErr)
 		}
 		if err == nil {
-			parts = append(parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: true})
+			task.parts = append(task.parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: true})
 			return finish(true, command.exitStatus, nil)
 		}
-		parts = append(parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: opts.PrintRetryOutput || attempt == opts.Retries})
+		task.parts = append(task.parts, outputPart{command: command, ch: ch, done: command.outputDone, emit: opts.PrintRetryOutput || attempt == opts.Retries})
 		if isOutputFailure(err) {
 			Log.Error(err)
 			return finish(false, 1, err)
