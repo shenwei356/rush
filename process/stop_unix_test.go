@@ -98,7 +98,7 @@ func TestStopFailureKillsDirectChildAndReportsError(t *testing.T) {
 	}
 	defer inner.Close()
 	controller := &failingStopController{processController: inner, err: sentinel, started: make(chan *exec.Cmd, 1)}
-	c := NewCommand(1, "sleep 30", make(chan struct{}), 50*time.Millisecond)
+	c := NewCommand(1, "exec sleep 30", make(chan struct{}), 50*time.Millisecond)
 	c.controller = controller
 	done := make(chan error, 1)
 	go func() {
@@ -117,6 +117,55 @@ func TestStopFailureKillsDirectChildAndReportsError(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run waited for a child after stopping it failed")
 	}
+}
+
+func TestUnixGroupSignalPermissionFallsBackToMembers(t *testing.T) {
+	old := sendUnixGroupSignal
+	sendUnixGroupSignal = func(int, syscall.Signal) error { return syscall.EPERM }
+	t.Cleanup(func() { sendUnixGroupSignal = old })
+
+	opts := &Options{CleanupTime: 0}
+	controller, err := newPlatformProcessController(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer controller.Close()
+	pidFile := t.TempDir() + "/child.pid"
+	cmd := getCommand(context.Background(), fmt.Sprintf("sh -c 'trap \"\" INT; exec sleep 30' & echo $! > %q; wait", pidFile))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }()
+	if err := controller.Started(cmd); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+	defer controller.Finished(cmd)
+	childPID := waitProcessPIDFile(t, pidFile)
+	defer func() { _ = syscall.Kill(childPID, syscall.SIGKILL) }()
+	if err := controller.KillCommand(cmd); err != nil {
+		t.Fatal(err)
+	}
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	select {
+	case <-waited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("group signal fallback left a command running")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		child, err := lookupPlatformProcess(childPID)
+		if errors.Is(err, os.ErrNotExist) || (err == nil && child.zombie) {
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("group signal fallback left a child running")
 }
 
 func TestStopFailureDoesNotWaitForeverForDescendantOutput(t *testing.T) {

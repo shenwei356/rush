@@ -28,6 +28,14 @@ type platformProcess struct {
 	zombie          bool
 }
 
+var sendUnixGroupSignal = func(pgid int, sig syscall.Signal) error {
+	return syscall.Kill(-pgid, sig)
+}
+
+func unixProcessGone(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
+}
+
 type unixController struct {
 	mu      sync.Mutex
 	opts    *Options
@@ -42,7 +50,7 @@ func newPlatformProcessController(opts *Options) (processController, error) {
 func (c *unixController) Started(cmd *exec.Cmd) error {
 	p, err := lookupPlatformProcess(cmd.Process.Pid)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+		if !unixProcessGone(err) {
 			return fmt.Errorf("identify process %d: %w", cmd.Process.Pid, err)
 		}
 		// A short-lived shell can exit before inspection. Keep its process
@@ -107,8 +115,8 @@ func (c *unixController) StopAll(cleanup time.Duration, force <-chan struct{}) e
 
 func (c *unixController) stop(root ProcessRecord, cleanup time.Duration, force <-chan struct{}) error {
 	p, err := validateRootProcess(root)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if err != nil && !unixProcessGone(err) {
+		return fmt.Errorf("identify command process %d: %w", root.pid, err)
 	}
 	known := make(map[int]platformProcess)
 	if err == nil {
@@ -214,7 +222,7 @@ func refreshAndCheckUnixTree(root ProcessRecord, known map[int]platformProcess) 
 	}
 	for pid, expected := range known {
 		current, err := lookupPlatformProcess(pid)
-		if errors.Is(err, os.ErrNotExist) {
+		if unixProcessGone(err) {
 			continue
 		}
 		if err != nil {
@@ -237,7 +245,7 @@ func (c *unixController) signalGraceful(root ProcessRecord, known map[int]platfo
 			return err
 		}
 		if alive {
-			if err := syscall.Kill(-root.pgid, syscall.SIGINT); err != nil && !errors.Is(err, syscall.ESRCH) {
+			if err := signalKnownUnixGroup(root, known, syscall.SIGINT); err != nil {
 				return err
 			}
 		}
@@ -252,7 +260,7 @@ func (c *unixController) signalGraceful(root ProcessRecord, known map[int]platfo
 	}
 	for _, p := range orderedUnixProcesses(known) {
 		name, err := fullPlatformProcessName(p)
-		if errors.Is(err, os.ErrNotExist) {
+		if unixProcessGone(err) {
 			continue
 		}
 		if err != nil {
@@ -278,7 +286,7 @@ func (c *unixController) signalForce(root ProcessRecord, known map[int]platformP
 			return err
 		}
 		if alive {
-			if err := syscall.Kill(-root.pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			if err := signalKnownUnixGroup(root, known, syscall.SIGKILL); err != nil {
 				return err
 			}
 		}
@@ -293,7 +301,7 @@ func (c *unixController) signalForce(root ProcessRecord, known map[int]platformP
 	}
 	for _, p := range orderedUnixProcesses(known) {
 		name, err := fullPlatformProcessName(p)
-		if errors.Is(err, os.ErrNotExist) {
+		if unixProcessGone(err) {
 			continue
 		}
 		if err != nil {
@@ -312,15 +320,15 @@ func (c *unixController) signalForce(root ProcessRecord, known map[int]platformP
 func identifiedUnixGroup(root ProcessRecord, known map[int]platformProcess) (bool, error) {
 	if _, err := validateRootProcess(root); err == nil {
 		return true, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return false, err
+	} else if !unixProcessGone(err) {
+		return false, fmt.Errorf("identify process group %d: %w", root.pgid, err)
 	}
 	for _, member := range known {
 		if member.pid == root.pid || member.pgid != root.pgid {
 			continue
 		}
 		current, err := lookupPlatformProcess(member.pid)
-		if errors.Is(err, os.ErrNotExist) {
+		if unixProcessGone(err) {
 			continue
 		}
 		if err != nil {
@@ -333,6 +341,28 @@ func identifiedUnixGroup(root ProcessRecord, known map[int]platformProcess) (boo
 	return false, nil
 }
 
+func signalKnownUnixGroup(root ProcessRecord, known map[int]platformProcess, sig syscall.Signal) error {
+	err := sendUnixGroupSignal(root.pgid, sig)
+	if err == nil || errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	if !errors.Is(err, syscall.EPERM) {
+		return fmt.Errorf("signal process group %d: %w", root.pgid, err)
+	}
+	// macOS may reject a group signal when any member has a different
+	// effective UID. Signal the identified members that we can control.
+	var memberErr error
+	for _, p := range orderedUnixProcesses(known) {
+		if p.pgid == root.pgid {
+			memberErr = errors.Join(memberErr, signalUnixProcess(p, sig))
+		}
+	}
+	if memberErr != nil {
+		return fmt.Errorf("signal process group %d: %w", root.pgid, errors.Join(err, memberErr))
+	}
+	return nil
+}
+
 func orderedUnixProcesses(known map[int]platformProcess) []platformProcess {
 	ps := make([]platformProcess, 0, len(known))
 	for _, p := range known {
@@ -343,7 +373,7 @@ func orderedUnixProcesses(known map[int]platformProcess) []platformProcess {
 }
 func signalUnixProcess(expected platformProcess, sig syscall.Signal) error {
 	current, err := lookupPlatformProcess(expected.pid)
-	if errors.Is(err, os.ErrNotExist) {
+	if unixProcessGone(err) {
 		return nil
 	}
 	if err != nil {

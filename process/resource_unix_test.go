@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -116,6 +117,9 @@ func TestLoadWaitAndCancellation(t *testing.T) {
 }
 
 func TestMemoryPressureRequeuesWithoutConsumingRetries(t *testing.T) {
+	oldSignal := sendUnixGroupSignal
+	sendUnixGroupSignal = func(int, syscall.Signal) error { return syscall.EPERM }
+	t.Cleanup(func() { sendUnixGroupSignal = oldSignal })
 	recorded := recordStarts(t, true)
 	oldMemory, oldPoll := availableMemory, resourcePollInterval
 	var free atomic.Uint64
