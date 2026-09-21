@@ -129,25 +129,25 @@ Scoop selects the 32-bit, 64-bit, or ARM64 binary for your system. The bucket ma
 
 #### Method 1: Download binaries
 
-[rush v0.10.0](https://github.com/shenwei356/rush/releases/tag/v0.10.0)
-[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.10.0/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.10.0)
+[rush v0.11.0](https://github.com/shenwei356/rush/releases/tag/v0.11.0)
+[![Github Releases (by Release)](https://img.shields.io/github/downloads/shenwei356/rush/v0.11.0/total.svg)](https://github.com/shenwei356/rush/releases/tag/v0.11.0)
 
 ***Tip: run `rush -V` to check update !!!***
 
 OS     |Arch      |File,                                                                                                                           |Download Count
 :------|:---------|:-------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_386.tar.gz)                      |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_386.tar.gz)
-Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_amd64.tar.gz)              |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_amd64.tar.gz)
-Linux  |**arm64** |[**rush_linux_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_arm64.tar.gz)              |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_arm64.tar.gz)
-OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_darwin_amd64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_darwin_amd64.tar.gz)
-OS X   |**arm64** |[**rush_darwin_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_darwin_arm64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_darwin_arm64.tar.gz)
-Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_386.exe.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_386.exe.tar.gz)
-Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_amd64.exe.tar.gz)  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_amd64.exe.tar.gz)
-Windows|**arm64** |[**rush_windows_arm64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_arm64.exe.tar.gz)  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_arm64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_arm64.exe.tar.gz)
-OpenBSD|**64-bit**|[**rush_openbsd_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_openbsd_amd64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_openbsd_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_openbsd_amd64.tar.gz)
-OpenBSD|**arm64** |[**rush_openbsd_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_openbsd_arm64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_openbsd_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_openbsd_arm64.tar.gz)
-FreeBSD|**64-bit**|[**rush_freebsd_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_freebsd_amd64.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_freebsd_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_freebsd_amd64.tar.gz)
-FreeBSD|**arm64** |[**rush_freebsd_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_freebsd_arm64.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_freebsd_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_freebsd_arm64.tar.gz)
+Linux  |32-bit    |[rush_linux_386.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_386.tar.gz)                      |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_386.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_386.tar.gz)
+Linux  |**64-bit**|[**rush_linux_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_amd64.tar.gz)              |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_amd64.tar.gz)
+Linux  |**arm64** |[**rush_linux_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_arm64.tar.gz)              |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_linux_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_arm64.tar.gz)
+OS X   |**64-bit**|[**rush_darwin_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_darwin_amd64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_darwin_amd64.tar.gz)
+OS X   |**arm64** |[**rush_darwin_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_darwin_arm64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_darwin_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_darwin_arm64.tar.gz)
+Windows|32-bit    |[rush_windows_386.exe.tar.gz](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_386.exe.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_386.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_386.exe.tar.gz)
+Windows|**64-bit**|[**rush_windows_amd64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_amd64.exe.tar.gz)  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_amd64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_amd64.exe.tar.gz)
+Windows|**arm64** |[**rush_windows_arm64.exe.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_arm64.exe.tar.gz)  |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_windows_arm64.exe.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_arm64.exe.tar.gz)
+OpenBSD|**64-bit**|[**rush_openbsd_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_openbsd_amd64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_openbsd_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_openbsd_amd64.tar.gz)
+OpenBSD|**arm64** |[**rush_openbsd_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_openbsd_arm64.tar.gz)            |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_openbsd_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_openbsd_arm64.tar.gz)
+FreeBSD|**64-bit**|[**rush_freebsd_amd64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_freebsd_amd64.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_freebsd_amd64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_freebsd_amd64.tar.gz)
+FreeBSD|**arm64** |[**rush_freebsd_arm64.tar.gz**](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_freebsd_arm64.tar.gz)          |[![Github Releases (by Asset)](https://img.shields.io/github/downloads/shenwei356/rush/latest/rush_freebsd_arm64.tar.gz.svg?maxAge=3600)](https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_freebsd_arm64.tar.gz)
 
 
 Just [download](https://github.com/shenwei356/rush/releases) compressed
@@ -199,7 +199,7 @@ And then:
 ```text
 rush -- a cross-platform command-line tool for executing jobs in parallel
 
-Version: 0.10.0
+Version: 0.11.0
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -329,6 +329,8 @@ Examples:
   16. run a command with relative paths in Windows, please use backslash as the separator.
       # "brename -l -R" is used to search paths recursively
       $ brename -l -q -R -i -p "\.go$" | rush "bin\app.exe {}"
+  17. send a fixed number of records to each command's standard input
+      $ seq 10000 | rush --pipe -n 1000 -j 4 'wc -l'
 
   More examples: https://github.com/shenwei356/rush
 
@@ -342,7 +344,7 @@ Flags:
                                   data so we can continue jobs next time; 3) if the file exists, rush
                                   ignores jobs in it and update the file; 4) skipped jobs are silent
                                   unless --verbose is used
-      --delay float              minimum seconds between starting jobs (supports fractions)
+      --delay float               minimum seconds between starting jobs (supports fractions)
       --dry-run                   print command but not run
   -q, --escape                    escape special symbols like $ which you can customize by flag
                                   -Q/--escape-symbols
@@ -354,9 +356,9 @@ Flags:
   -i, --infile strings            input data file, multi-values supported
   -j, --jobs int                  run n jobs in parallel (default value depends on your device) (default 16)
   -k, --keep-order                keep output in order of input
-      --load string              start jobs only while system load is below this value (number or
+      --load string               start jobs only while system load is below this value (number or
                                   percent of CPUs)
-      --memfree string           minimum available memory before starting jobs (bytes or K/M/G/T/P suffix)
+      --memfree string            minimum available memory before starting jobs (bytes or K/M/G/T/P suffix)
       --no-kill-exes strings      exe names to exclude from kill signal, example: mspdbsrv.exe; or use
                                   all for all exes (default none)
       --no-stop-exes strings      exe names to exclude from stop signal, example: mspdbsrv.exe; or use
@@ -370,8 +372,7 @@ Flags:
   -J, --records-join-sep string   record separator for joining multi-records (default is "\n") (default "\n")
   -r, --retries int               maximum retries (default 0)
       --retry-interval float      retry interval (unit: second, supports fractions like 0.5) (default 0)
-  -e, --stop-on-error             stop child processes on first error (not perfect, you may stop it by
-                                  typing ctrl-c or closing terminal)
+  -e, --stop-on-error             stop scheduling and clean up active child processes on first error
   -C, --succ-cmd-file string      file for saving successful commands (default "successful_cmds.rush")
   -t, --timeout int               timeout of a command (unit: seconds, 0 for no timeout) (default 0)
   -T, --trim string               trim white space (" \t\r\n") in input (available values: "l" for left,
@@ -438,7 +439,7 @@ limits imposed on a container may differ from the reported available memory.
         python: can't open file 'unexisted_script.py': [Errno 2] No such file or directory
         [ERRO] wait command: python unexisted_script.py: exit status 2
 
-1. Input containing `{}` (since v0.10.0)
+1. Input containing `{}` (since v0.11.0)
 
         $ echo "a attr{href}"="h4 text{}" | rush -T b -k -D "=" 'echo "{}"'
         a attr{href}
