@@ -55,6 +55,7 @@ Major:
 - **Exit on first error** (`-e`): stop scheduling and clean up active child processes. (`--halt 2` in GNU parallel)
 - **Settable record delimiter** (`-D`, default `\n`). (`--recstart` and `--recend` in GNU parallel)
 - **Settable records sending to every command** (`-n`, default `1`). (`-n/--max-args` in GNU parallel)
+- **Send record batches to commands via standard input** (`--pipe`). (`--pipe` in GNU parallel)
 - **Settable field delimiter** (`-d`, default `\s+`). (Same `-d/--delimiter` in GNU parallel)
 - **Practical replacement strings** (like GNU parallel):
     - Input data
@@ -201,6 +202,7 @@ Input:
     -D, --record-delimiter  record delimiter (default "\n")
     -n, --nrecords          number of records sent to a command (default 1)
     -J, --records-join-sep  record separator for joining multi-records (default "\n")
+        --pipe              send each group of records to the command's standard input
     -T, --trim              trim white space (" \t\r\n") in input
 
 Output:
@@ -346,6 +348,7 @@ Flags:
                                   all for all exes (default none)
   -n, --nrecords int              number of records sent to a command (default 1)
   -o, --out-file string           out file ("-" for stdout) (default "-")
+      --pipe                      send each group of records to the command's standard input
       --print-retry-output        print output from retry commands (default true)
       --propagate-exit-status     propagate child exit status up to the exit status of rush (default true)
   -D, --record-delimiter string   record delimiter (default is "\n") (default "\n")
@@ -483,6 +486,27 @@ Flags:
         1
         3
         5
+
+1. Send record batches to the command's standard input (`--pipe`)
+
+        $ seq 5 | rush --pipe -n 2 -k 'wc -l'
+        2
+        2
+        1
+
+    `-n` sets the maximum number of records in each batch. `-D` controls the
+    input record delimiter. A delimiter terminating a non-empty record is
+    preserved, while an unterminated final record remains unterminated. Empty
+    records are ignored, as in normal mode. `-J` only affects record placeholders
+    and does not change data sent to standard input.
+
+    Retries receive the same batch again. With `--continue`, a batch is identified
+    by both the expanded command and a digest of its standard input. Replacement
+    strings remain available, but omit record placeholders such as `{}` when the
+    goal is to avoid shell command-line size limits.
+
+    `rush` currently reads all input before starting jobs. `--pipe` avoids command-line
+    size limits, but does not yet provide streaming block processing.
 
 1. Custom record delimiter (`-D`), note that empty records are not used.
 

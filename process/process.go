@@ -50,6 +50,7 @@ type Command struct {
 	ID               uint64
 	Cmd              string
 	recordCmd        string
+	stdin            string
 	Cancel           <-chan struct{}
 	Timeout          time.Duration
 	ctx              context.Context
@@ -112,6 +113,9 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	}
 	command := getCommand(context.Background(), c.Cmd)
 	command.Env = append(os.Environ(), "RUSH_CHILD_GROUP=[rush]")
+	if c.stdin != "" {
+		command.Stdin = strings.NewReader(c.stdin)
+	}
 	spill := newSpillWriter(TmpOutputDataBuffer)
 	var stdout, stderr *lockedWriter
 	if opts.ImmediateOutput {
@@ -582,6 +586,7 @@ func (o *Options) stopChildren() {
 type Job struct {
 	Cmd       string // Cmd is the command text passed to the shell.
 	RecordCmd string // RecordCmd is the stable text recorded after success.
+	Stdin     string // Stdin is replayed for every execution attempt.
 }
 
 type commandInput interface {
@@ -824,6 +829,7 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 				}
 				text := ""
 				recordText := ""
+				stdin := ""
 				switch value := any(inputValue).(type) {
 				case string:
 					text = value
@@ -831,6 +837,7 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 				case Job:
 					text = value.Cmd
 					recordText = value.RecordCmd
+					stdin = value.Stdin
 					if recordText == "" {
 						recordText = text
 					}
@@ -845,10 +852,10 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 				workers.Add(1)
 				active++
 				inflight++
-				go func(id uint64, text, recordText string) {
+				go func(id uint64, text, recordText, stdin string) {
 					defer workers.Done()
-					results <- executeWithRetries(ctx, opts, controller, id, text, recordText)
-				}(id, text, recordText)
+					results <- executeWithRetries(ctx, opts, controller, id, text, recordText, stdin)
+				}(id, text, recordText, stdin)
 				id++
 			case result := <-resultCh:
 				active--
@@ -902,7 +909,7 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 	return commands, success, done, statuses
 }
 
-func executeWithRetries(ctx context.Context, opts *Options, controller processController, id uint64, text, recordText string) runResult {
+func executeWithRetries(ctx context.Context, opts *Options, controller processController, id uint64, text, recordText, stdin string) runResult {
 	var parts []outputPart
 	var command *Command
 	finish := func(success bool, status int, outputErr error) runResult {
@@ -912,6 +919,7 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 	for attempt := 0; attempt <= opts.Retries; attempt++ {
 		command = NewCommand(id, text, ctx.Done(), opts.Timeout)
 		command.recordCmd = recordText
+		command.stdin = stdin
 		command.controller = controller
 		command.dryrun = opts.DryRun
 		ch, err := command.Run(opts, attempt+1)

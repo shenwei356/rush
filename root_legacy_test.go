@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -39,6 +40,31 @@ func TestLegacyCommandHelper(t *testing.T) {
 	case "large":
 		n, _ := strconv.Atoi(os.Getenv("RUSH_LEGACY_OUTPUT_BYTES"))
 		fmt.Print(strings.Repeat("x", n))
+	case "stdin-framed":
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			os.Exit(22)
+		}
+		fmt.Printf("%q\n", string(data))
+	case "stdin-retry":
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			os.Exit(22)
+		}
+		path := os.Getenv("RUSH_LEGACY_ATTEMPTS")
+		previous, _ := os.ReadFile(path)
+		attempt := bytes.Count(previous, []byte{0}) + 1
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			os.Exit(20)
+		}
+		_, _ = f.Write(data)
+		_, _ = f.Write([]byte{0})
+		_ = f.Close()
+		if attempt < 3 {
+			os.Exit(7)
+		}
+		_, _ = os.Stdout.Write(data)
 	default:
 		os.Exit(21)
 	}
@@ -83,6 +109,75 @@ func TestLegacyDelimiterBoundaries(t *testing.T) {
 	stdout, stderr, code := runLegacyRush(t, "aa,bb||cc,dd||tail,ee", nil, "-j", "1", "-D", "||", "-d", ",", "echo {1}:{2}")
 	if code != 0 || stderr != "" || normalizedLines(stdout) != "aa:bb\ncc:dd\ntail:ee" {
 		t.Fatalf("delimiter: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestLegacyPipeRecordBatches(t *testing.T) {
+	helper := shellQuote(os.Args[0]) + " -test.run=^TestLegacyCommandHelper$"
+	env := []string{"RUSH_LEGACY_COMMAND_HELPER=1", "RUSH_LEGACY_HELPER_MODE=stdin-framed"}
+	tests := []struct {
+		name  string
+		input string
+		args  []string
+		want  string
+	}{
+		{name: "newline with unterminated final record", input: "a\nb\nc", args: []string{"-n", "2"}, want: "\"a\\nb\\n\"\n\"c\"\n"},
+		{name: "custom delimiter", input: "aa||bb||cc", args: []string{"-D", "||", "-n", "2"}, want: "\"aa||bb||\"\n\"cc\"\n"},
+		{name: "one byte records", input: "abc", args: []string{"-D", "", "-n", "2"}, want: "\"ab\"\n\"c\"\n"},
+		{name: "empty records are ignored", input: "a\n\nb\n", args: []string{"-n", "2"}, want: "\"a\\nb\\n\"\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"--pipe", "-j", "1", "-k"}, tt.args...)
+			args = append(args, helper)
+			stdout, stderr, code := runLegacyRush(t, tt.input, env, args...)
+			if code != 0 || stdout != tt.want || stderr != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q; want %q", code, stdout, stderr, tt.want)
+			}
+		})
+	}
+}
+
+func TestLegacyPipeReplaysStdinOnRetry(t *testing.T) {
+	helper := shellQuote(os.Args[0]) + " -test.run=^TestLegacyCommandHelper$"
+	attempts := t.TempDir() + string(os.PathSeparator) + "attempts"
+	env := []string{"RUSH_LEGACY_COMMAND_HELPER=1", "RUSH_LEGACY_HELPER_MODE=stdin-retry", "RUSH_LEGACY_ATTEMPTS=" + attempts}
+	input := "alpha\nbeta\n"
+	stdout, stderr, code := runLegacyRush(t, input, env, "--pipe", "-j", "1", "-n", "2", "-r", "2", helper)
+	data, err := os.ReadFile(attempts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAttempts := strings.Repeat(input+"\x00", 3)
+	if code != 0 || stdout != input || string(data) != wantAttempts || strings.Count(stderr, "wait cmd") != 2 {
+		t.Fatalf("code=%d stdout=%q attempts=%q stderr=%q", code, stdout, data, stderr)
+	}
+}
+
+func TestLegacyPipeContinueIncludesStdin(t *testing.T) {
+	helper := shellQuote(os.Args[0]) + " -test.run=^TestLegacyCommandHelper$"
+	env := []string{"RUSH_LEGACY_COMMAND_HELPER=1", "RUSH_LEGACY_HELPER_MODE=stdin-framed"}
+	successFile := t.TempDir() + string(os.PathSeparator) + "successful.rush"
+	args := []string{"--pipe", "-j", "1", "-k", "-n", "2", "-c", "-C", successFile, helper}
+
+	stdout, stderr, code := runLegacyRush(t, "a\nb\nc\n", env, args...)
+	if code != 0 || stdout != "\"a\\nb\\n\"\n\"c\\n\"\n" || stderr != "" {
+		t.Fatalf("first run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	stdout, stderr, code = runLegacyRush(t, "a\nb\nc\n", env, args...)
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("second run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	stdout, stderr, code = runLegacyRush(t, "a\nb\nx\n", env, args...)
+	if code != 0 || stdout != "\"x\\n\"\n" || stderr != "" {
+		t.Fatalf("changed input: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	recorded, err := os.ReadFile(successFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(recorded, []byte("# rush --pipe stdin sha256:")) {
+		t.Fatalf("successful-command file does not identify piped input: %q", recorded)
 	}
 }
 

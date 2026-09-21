@@ -1,4 +1,5 @@
 - rush v0.11.0
+    - **Add `--pipe` to send each `-n` record batch to the command's standard input**, preserving terminating record delimiters and replaying the batch for retries. `--continue` distinguishes batches by their input digest. [#22](https://github.com/shenwei356/rush/issues/22)
     - `--eta`: Fix progress bar incorrectly showing 100% after interruption with `Ctrl+C`. Cancelled commands no longer increment the progress bar.
     - `--eta`: Add "processed jobs" description to clarify that the progress bar shows processed tasks (including both successful and failed commands).
     - **Keep `{#}` stable in `--continue` records when input order changes**. [#77](https://github.com/shenwei356/rush/issues/77)

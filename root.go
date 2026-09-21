@@ -24,6 +24,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/signal"
@@ -85,6 +86,7 @@ Input:
     -D, --record-delimiter  record delimiter (default "\n")
     -n, --nrecords          number of records sent to a command (default 1)
     -J, --records-join-sep  record separator for joining multi-records (default "\n")
+        --pipe              send each group of records to the command's standard input
     -T, --trim              trim white space (" \t\r\n") in input
 
 Output:
@@ -254,7 +256,7 @@ Preset variable (macro):
 			}
 			i := bytes.Index(data, recordDelimiter)
 			if i >= 0 {
-				return i + len(recordDelimiter), data[0:i], nil // trim config.RecordDelimiter
+				return i + len(recordDelimiter), data[0 : i+len(recordDelimiter)], nil
 			}
 			if atEOF {
 				return len(data), data, nil
@@ -327,7 +329,7 @@ Preset variable (macro):
 
 		anyCommands := false
 
-		var inputlines []string
+		var inputlines []inputRecord
 	READ_INPUT:
 		for _, file := range config.Infiles {
 			if runCtx.Err() != nil {
@@ -368,7 +370,13 @@ Preset variable (macro):
 					break READ_INPUT
 				default:
 				}
-				inputlines = append(inputlines, scanner.Text())
+				record := scanner.Text()
+				terminated := false
+				if len(recordDelimiter) > 0 && strings.HasSuffix(record, config.RecordDelimiter) {
+					record = record[:len(record)-len(config.RecordDelimiter)]
+					terminated = true
+				}
+				inputlines = append(inputlines, inputRecord{data: record, terminated: terminated})
 			}
 			close(inputCloserDone)
 			<-inputCloserExited
@@ -404,9 +412,9 @@ Preset variable (macro):
 			defer close(chCmdStr)
 			defer close(donePreprocessFiles)
 
-			sendCommand := func(cmdStr, recordCmd string) bool {
+			sendCommand := func(cmdStr, recordCmd, stdin string) bool {
 				select {
-				case chCmdStr <- process.Job{Cmd: cmdStr, RecordCmd: recordCmd}:
+				case chCmdStr <- process.Job{Cmd: cmdStr, RecordCmd: recordCmd, Stdin: stdin}:
 					anyCommands = true
 					return true
 				case <-runCtx.Done():
@@ -416,6 +424,9 @@ Preset variable (macro):
 			wasSuccessful := func(recordCmd, cmdStr string) bool {
 				if _, ok := succCmds[recordCmd]; ok {
 					return true
+				}
+				if config.Pipe {
+					return false
 				}
 				// Older successful-command files contain the expanded {#} value.
 				_, ok := succCmds[cmdStr]
@@ -427,14 +438,18 @@ Preset variable (macro):
 
 			var records []string
 			records = make([]string, 0, n)
+			pipeRecords := make([]inputRecord, 0, n)
 			var cmdStr, recordCmd string
+			var stdin string
 			var runned bool
 			nJobs := (len(inputlines) + n - 1) / n
-			for _, record := range inputlines {
+			for _, input := range inputlines {
+				record := input.data
 				if record == "" {
 					continue
 				}
 				records = append(records, record)
+				pipeRecords = append(pipeRecords, input)
 
 				if len(records) == n {
 					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
@@ -447,6 +462,13 @@ Preset variable (macro):
 					if config.Escape {
 						cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
 						recordCmd = stringutil.EscapeSymbols(recordCmd, config.EscapeSymbols)
+					}
+					stdin = ""
+					if config.Pipe {
+						stdin = buildPipeInput(pipeRecords, config.RecordDelimiter)
+						if config.Continue {
+							recordCmd = pipeContinueKey(recordCmd, stdin)
+						}
 					}
 					if len(cmdStr) > 0 {
 						if config.Continue {
@@ -461,12 +483,12 @@ Preset variable (macro):
 								// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 								// bfhSuccCmds.Flush()
 							} else {
-								if !sendCommand(cmdStr, recordCmd) {
+								if !sendCommand(cmdStr, recordCmd, stdin) {
 									return
 								}
 							}
 						} else {
-							if !sendCommand(cmdStr, recordCmd) {
+							if !sendCommand(cmdStr, recordCmd, stdin) {
 								return
 							}
 						}
@@ -474,6 +496,7 @@ Preset variable (macro):
 						id++
 					}
 					records = make([]string, 0, n)
+					pipeRecords = make([]inputRecord, 0, n)
 				}
 			}
 			if len(records) > 0 {
@@ -488,6 +511,13 @@ Preset variable (macro):
 					cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
 					recordCmd = stringutil.EscapeSymbols(recordCmd, config.EscapeSymbols)
 				}
+				stdin = ""
+				if config.Pipe {
+					stdin = buildPipeInput(pipeRecords, config.RecordDelimiter)
+					if config.Continue {
+						recordCmd = pipeContinueKey(recordCmd, stdin)
+					}
+				}
 				if len(cmdStr) > 0 {
 					if config.Continue {
 						if runned = wasSuccessful(recordCmd, cmdStr); runned {
@@ -497,12 +527,12 @@ Preset variable (macro):
 							// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
 							// bfhSuccCmds.Flush()
 						} else {
-							if !sendCommand(cmdStr, recordCmd) {
+							if !sendCommand(cmdStr, recordCmd, stdin) {
 								return
 							}
 						}
 					} else {
-						if !sendCommand(cmdStr, recordCmd) {
+						if !sendCommand(cmdStr, recordCmd, stdin) {
 							return
 						}
 					}
@@ -603,6 +633,27 @@ Preset variable (macro):
 	},
 }
 
+type inputRecord struct {
+	data       string
+	terminated bool
+}
+
+func buildPipeInput(records []inputRecord, delimiter string) string {
+	var buf strings.Builder
+	for i, record := range records {
+		buf.WriteString(record.data)
+		if delimiter != "" && (record.terminated || i+1 < len(records)) {
+			buf.WriteString(delimiter)
+		}
+	}
+	return buf.String()
+}
+
+func pipeContinueKey(command, stdin string) string {
+	digest := sha256.Sum256([]byte(stdin))
+	return fmt.Sprintf("%s\n# rush --pipe stdin sha256: %x", command, digest)
+}
+
 // Chunk contains input data records sent to a command
 type Chunk struct {
 	ID   uint64
@@ -632,6 +683,7 @@ func init() {
 	RootCmd.Flags().StringP("records-join-sep", "J", "\n", `record separator for joining multi-records (default is "\n")`)
 	RootCmd.Flags().IntP("nrecords", "n", 1, "number of records sent to a command")
 	RootCmd.Flags().StringP("field-delimiter", "d", `\s+`, "field delimiter in records, support regular expression")
+	RootCmd.Flags().Bool("pipe", false, "send each group of records to the command's standard input")
 
 	RootCmd.Flags().IntP("retries", "r", 0, "maximum retries (default 0)")
 	RootCmd.Flags().Float64P("retry-interval", "", 0, "retry interval (unit: second, supports fractions like 0.5) (default 0)")
@@ -723,6 +775,8 @@ func init() {
   16. run a command with relative paths in Windows, please use backslash as the separator.
       # "brename -l -R" is used to search paths recursively
       $ brename -l -q -R -i -p "\.go$" | rush "bin\app.exe {}"
+  17. send a fixed number of records to each command's standard input
+      $ seq 10000 | rush --pipe -n 1000 -j 4 'wc -l'
 
   More examples: https://github.com/shenwei356/rush`
 
@@ -769,6 +823,7 @@ type Config struct {
 	NRecords             int
 	FieldDelimiter       string
 	reFieldDelimiter     *regexp.Regexp
+	Pipe                 bool
 
 	Retries          int
 	RetryInterval    float64
@@ -839,6 +894,7 @@ func getConfigs(cmd *cobra.Command) Config {
 		RecordsJoinSeparator: getFlagString(cmd, "records-join-sep"),
 		NRecords:             getFlagPositiveInt(cmd, "nrecords"),
 		FieldDelimiter:       getFlagString(cmd, "field-delimiter"),
+		Pipe:                 getFlagBool(cmd, "pipe"),
 
 		Retries:          getFlagNonNegativeInt(cmd, "retries"),
 		RetryInterval:    getFlagNonNegativeFloat64(cmd, "retry-interval"),
