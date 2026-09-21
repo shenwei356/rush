@@ -1,20 +1,20 @@
 {
-    "version": "0.10.0",
+    "version": "0.11.0",
     "description": "Run commands in parallel",
     "homepage": "https://github.com/shenwei356/rush",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_amd64.exe.tar.gz",
-            "hash": "c93f3ea86610258de5a920b641c7c127916faacdffab3f8f9198c79d3c551400"
+            "url": "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_amd64.exe.tar.gz",
+            "hash": "47dd38a1d527c8e00714623351379dfa2f617cf9f8f399586233c5ca29482a45"
         },
         "32bit": {
-            "url": "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_386.exe.tar.gz",
-            "hash": "9386056b6e5f072c1773ef83a63764531b808973d1ca7954bc623676275a93ed"
+            "url": "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_386.exe.tar.gz",
+            "hash": "55fc429f4e2f28c77c6d2c88aebf7c509e735c5298cd3671d3fd53bcfce0a955"
         },
         "arm64": {
-            "url": "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_arm64.exe.tar.gz",
-            "hash": "5c6b28fe23a4688e069018bffc2b6468f6de4f687231c66f22768a5bb81f208d"
+            "url": "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_arm64.exe.tar.gz",
+            "hash": "00fef6299563f454f2dc41de8da1eef13e03502886fe255cfb575ed478f63dc0"
         }
     },
     "bin": "rush.exe",
