@@ -707,11 +707,14 @@ limits imposed on a container may differ from the reported available memory.
     and literal placeholders. Jobs using `{#}` also track input batches and
     repeated occurrences, so a completed job cannot hide an unfinished one.
     Macro compositions are matched by their expanded results.
+    Matching also accounts for digit escaping in `{#}` and `{?}`.
 
     Damaged or ambiguous older records are rejected before execution and left
     unchanged. Review completed jobs before rebuilding the file; automatic
     conversion cannot recover missing distinctions. Unambiguous older records
     remain readable, including commands with expanded numeric job IDs.
+    Records from older builds that escaped digits in `{#}` or `{?}` lack those
+    escape settings; rebuild them from verified completed jobs before reuse.
 
     Expansion errors stop active jobs and preserve completed-job records.
     An error before the first new command leaves existing output intact.

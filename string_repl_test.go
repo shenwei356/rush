@@ -128,6 +128,7 @@ func TestComposedContinueKeyEscaping(t *testing.T) {
 	// or the surviving job-ID marker, even when their bytes are escape symbols.
 	got := escapeContinueCommand(key, "\x00r1")
 	want := continueComposedCommandPrefix + "echo " + continueJobIDMarker + ":\\1"
+	want += continueDigitEscapePrefix + "1\x00"
 	if got != want {
 		t.Fatalf("escaped key=%q; want %q", got, want)
 	}
@@ -182,8 +183,9 @@ func TestJobPlaceholdersRejectCombinedOperations(t *testing.T) {
 		if err != nil || !strings.HasPrefix(key, continueCommandPrefix) {
 			t.Fatalf("key=%q err=%v", key, err)
 		}
-		if escaped := escapeContinueCommand(key, "R0123456789"); escaped != key {
-			t.Errorf("metadata changed: %q", escaped)
+		want := key + continueDigitEscapePrefix + "0123456789\x00"
+		if escaped := escapeContinueCommand(key, "R0123456789"); escaped != want {
+			t.Errorf("escape identity=%q; want %q", escaped, want)
 		}
 		changed := config
 		changed.Jobs = runtime.NumCPU() + 1

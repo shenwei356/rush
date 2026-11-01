@@ -57,6 +57,9 @@ const continuePipePrefix = "\x00rush-continue-pipe-v1:"
 const continueComposedCommandPrefix = "\x00rush-composed-command-v1:"
 const continueComposedPipePrefix = "\x00rush-composed-pipe-v1:"
 
+// continueDigitEscapePrefix marks trailing escape settings for dynamic job values.
+const continueDigitEscapePrefix = "\x00rush-escape-digits-v1:"
+
 func isComposedContinueRecord(record string) bool {
 	record = continueJobCommand(record)
 	return strings.HasPrefix(record, continueComposedCommandPrefix) || strings.HasPrefix(record, continueComposedPipePrefix)
@@ -146,12 +149,26 @@ func escapeContinueCommand(record, symbols string) string {
 	var escaped strings.Builder
 	escaped.WriteString(prefix)
 	start := 0
-	for _, bounds := range reContinueMarker.FindAllStringIndex(body, -1) {
+	markers := reContinueMarker.FindAllStringIndex(body, -1)
+	for _, bounds := range markers {
 		escaped.WriteString(stringutil.EscapeSymbols(body[start:bounds[0]], symbols))
 		escaped.WriteString(body[bounds[0]:bounds[1]])
 		start = bounds[1]
 	}
 	escaped.WriteString(stringutil.EscapeSymbols(body[start:], symbols))
+	if len(markers) > 0 {
+		// Normalized markers hide their numeric values. Retain the digit escape
+		// policy so changing it cannot silently skip a different shell command.
+		digits := strings.Map(func(digit rune) rune {
+			if strings.ContainsRune(symbols, digit) {
+				return digit
+			}
+			return -1
+		}, "0123456789")
+		if digits != "" {
+			escaped.WriteString(continueDigitEscapePrefix + digits + "\x00")
+		}
+	}
 	return escaped.String()
 }
 

@@ -1,7 +1,7 @@
 - rush v0.11.1
     - Prevent file-descriptor exhaustion with many jobs or input files.
     - Fix child-process cleanup, executable exclusions, and hangs during failures, retries, and interrupts.
-    - Fix `--continue` matching and concurrent access; reject damaged or ambiguous records and keep dry runs read-only.
+    - Fix `--continue` matching, including escaped job values, and concurrent access; reject damaged or ambiguous records and keep dry runs read-only.
     - Reject invalid or conflicting file paths, handle I/O failures promptly, and fix named-pipe output and `--pipe` trimming.
     - Fix path and placeholder expansion; preserve input braces, undefined variables, and unsupported expressions.
     - Correct timeout/signal exit statuses and retain interrupted retry output.

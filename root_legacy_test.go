@@ -610,6 +610,35 @@ func TestContinueDistinguishesInvalidJobPlaceholders(t *testing.T) {
 	}
 }
 
+func TestContinueDistinguishesEscapedJobValues(t *testing.T) {
+	for _, placeholder := range []string{"{#}", "{?}"} {
+		for _, pipe := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/pipe=%t", placeholder, pipe), func(t *testing.T) {
+				args := []string{"-j", strconv.Itoa(runtime.NumCPU()), "-c", "-C", t.TempDir() + "/success"}
+				if pipe {
+					args = append(args, "--pipe")
+				}
+				command := "printf '%s\\n' '" + placeholder + "'"
+				if runtime.GOOS == "windows" {
+					command = "echo " + placeholder // cmd.exe retains the backslash.
+				}
+				for _, step := range []struct{ symbols, want string }{
+					{"12", "\\1"}, {"", "1"}, {"2211", ""}, {"", ""},
+				} {
+					flags := append([]string{}, args...)
+					if step.symbols != "" {
+						flags = append(flags, "-q", "-Q", step.symbols)
+					}
+					stdout, stderr, code := runLegacyRush(t, "a\n", nil, append(flags, command)...)
+					if code != 0 || normalizedLines(stdout) != step.want {
+						t.Fatalf("symbols=%q: exit=%d stdout=%q stderr=%q; want %q", step.symbols, code, stdout, stderr, step.want)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestContinueEscapingPreservesMetadata(t *testing.T) {
 	journal := t.TempDir() + "/success"
 	command := "echo {#}:{?}:{}"
