@@ -96,10 +96,14 @@ func diagnosticConfig(flags *pflag.FlagSet, args []string) Config {
 	return config
 }
 
-// protectRunDiagnostics rejects inherited stderr aliases before option errors
-// or execution logs can modify an input or a successful-command file.
-func protectRunDiagnostics(config Config) error {
-	diagnostics, err := inspectRunFile("stderr", "", os.Stderr, false)
+// protectRunStream rejects stdout/stderr aliases before informational output or
+// diagnostics can modify an input or a successful-command file.
+func protectRunStream(config Config, stream *os.File) error {
+	role, fallback := "stderr", os.Stdout
+	if stream == os.Stdout {
+		role, fallback = "stdout", os.Stderr
+	}
+	diagnostics, err := inspectRunFile(role, "", stream, false)
 	if err != nil {
 		// Normal setup reports unusable streams. No alias can be identified.
 		return nil
@@ -131,25 +135,24 @@ func protectRunDiagnostics(config Config) error {
 		if !diagnostics.aliases(file) {
 			continue
 		}
-		// Reporting this rejection to stderr would itself corrupt the file.
-		// Use stdout only if it cannot modify a run file; otherwise fail quietly.
+		// Report through the other stream only if it cannot modify a run file.
 		logBackend.Logger.SetOutput(io.Discard)
 		if !isStdin(config.OutFile) {
 			add("output", config.OutFile, nil)
 		}
-		if stdout, err := inspectRunFile("stdout", "", os.Stdout, false); err == nil {
+		if alternative, err := inspectRunFile("diagnostic", "", fallback, false); err == nil {
 			safe := true
 			for _, target := range protected {
-				if stdout.aliases(target) {
+				if alternative.aliases(target) {
 					safe = false
 					break
 				}
 			}
 			if safe {
-				logBackend.Logger.SetOutput(os.Stdout)
+				logBackend.Logger.SetOutput(fallback)
 			}
 		}
-		return fmt.Errorf("stderr and %s refer to the same file", file.role)
+		return fmt.Errorf("%s and %s refer to the same file", role, file.role)
 	}
 	return nil
 }

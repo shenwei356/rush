@@ -258,6 +258,71 @@ func TestDiagnosticsRejectProtectedFileAliases(t *testing.T) {
 	}
 }
 
+func TestInformationalOutputRejectsProtectedFileAliases(t *testing.T) {
+	for _, flag := range []string{"--help", "--version"} {
+		for _, role := range []string{"input", "stdin", "continue"} {
+			for _, sharedStderr := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/shared-stderr=%t", flag, role, sharedStderr), func(t *testing.T) {
+					path := filepath.Join(t.TempDir(), "protected")
+					original := "alpha\n"
+					if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+						t.Fatal(err)
+					}
+					output, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer output.Close()
+					unusedOutput := filepath.Join(filepath.Dir(path), "unused-output")
+					args := []string{"-test.run=^TestRushHelperProcess$", "--", flag, "-o", unusedOutput}
+					if role == "input" {
+						args = append(args, "-i", path)
+					} else if role == "continue" {
+						args = append(args, "-c", "-C", path)
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					cmd := exec.CommandContext(ctx, os.Args[0], args...)
+					cmd.Env = append(os.Environ(), "RUSH_TEST_HELPER_PROCESS=1", "RUSH_TEST_VERSION_RESPONSE=current")
+					if role == "stdin" {
+						input, err := os.Open(path)
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer input.Close()
+						cmd.Stdin = input
+					}
+					var diagnostic bytes.Buffer
+					cmd.Stdout, cmd.Stderr = output, &diagnostic
+					if sharedStderr {
+						cmd.Stderr = output
+					}
+					if err := cmd.Run(); err == nil || ctx.Err() != nil {
+						t.Errorf("output alias accepted: err=%v stderr=%q", err, &diagnostic)
+					}
+					if data, err := os.ReadFile(path); err != nil || string(data) != original {
+						t.Errorf("protected file changed: %.200q, err=%v", data, err)
+					}
+					if !sharedStderr && !strings.Contains(diagnostic.String(), "stdout and") {
+						t.Errorf("missing safe diagnostic: %q", &diagnostic)
+					}
+					if _, err := os.Stat(unusedOutput); !os.IsNotExist(err) {
+						t.Errorf("informational output created the run output: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHelpIgnoresInvalidRunOptions(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	stdout, stderr, code := runLegacyRush(t, "", nil, "-h", "-i", missing, "--trim", "invalid")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "Usage:") {
+		t.Fatalf("help validated unused run options: exit=%d stdout=%.200q stderr=%q", code, stdout, stderr)
+	}
+}
+
 func TestOutputRejectsNewContinueAliasBeforeCreation(t *testing.T) {
 	dir := t.TempDir()
 	output := filepath.Join(dir, "output")

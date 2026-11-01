@@ -168,6 +168,7 @@ Resource limits:
 		}
 
 		if config.Version {
+			checkError(protectRunStream(config, os.Stdout))
 			checkVersion()
 			return
 		}
@@ -872,7 +873,15 @@ func Execute() {
 
 // executeArgs protects diagnostic destinations before Cobra can report errors.
 func executeArgs(args []string) {
-	checkError(protectRunDiagnostics(diagnosticConfig(RootCmd.Flags(), args)))
+	config := diagnosticConfig(RootCmd.Flags(), args)
+	checkError(protectRunStream(config, os.Stderr))
+	// Help bypasses Run, so protect its output without validating run options.
+	help := RootCmd.HelpFunc()
+	RootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		checkError(protectRunStream(config, os.Stdout))
+		help(cmd, args)
+	})
+	defer RootCmd.SetHelpFunc(help)
 	RootCmd.SetArgs(args)
 	if err := RootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
