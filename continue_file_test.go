@@ -96,7 +96,7 @@ func TestContinueLockRejectsConflictsBeforeOutput(t *testing.T) {
 					t.Fatalf("output created: %q, err=%v", data, err)
 				}
 				stdout, stderr, code = runLegacyRush(t, "new\n", nil, "-c", "-C", journal, "echo {}")
-				if code != 0 || stdout != "new\n" {
+				if code != 0 || strings.ReplaceAll(stdout, "\r\n", "\n") != "new\n" {
 					t.Fatalf("lock survived close: exit=%d stdout=%q stderr=%q", code, stdout, stderr)
 				}
 			})
@@ -177,7 +177,7 @@ func TestContinueLockHeldUntilProcessExit(t *testing.T) {
 	}
 	_ = cmd.Wait()
 	stdout, diagnostic, code = runLegacyRush(t, "new\n", nil, "-c", "-C", journal, "echo {}")
-	if code != 0 || stdout != "new\n" {
+	if code != 0 || strings.ReplaceAll(stdout, "\r\n", "\n") != "new\n" {
 		t.Fatalf("lock survived process exit: exit=%d stdout=%q stderr=%q; first stderr=%q", code, stdout, diagnostic, stderr.String())
 	}
 }

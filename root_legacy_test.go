@@ -597,9 +597,13 @@ func TestContinueDistinguishesInvalidJobPlaceholders(t *testing.T) {
 				{"{?^" + threads + "}", "begin{?^" + threads + "}end"}, {"{?}", "begin" + threads + "end"},
 				{"{?@([A-Z]+)}", "begin{?@([A-Z]+)}end"}, {"RUSH", "beginRUSHend"},
 			} {
+				want := test.want
+				if runtime.GOOS == "windows" {
+					want = `"` + want + `"` // cmd.exe echo retains surrounding quotes.
+				}
 				stdout, stderr, code := run(test.expression, "1")
-				if code != 0 || normalizedLines(stdout) != test.want {
-					t.Fatalf("%s: exit=%d stdout=%q stderr=%q; want %q", test.expression, code, stdout, stderr, test.want)
+				if code != 0 || normalizedLines(stdout) != want {
+					t.Fatalf("%s: exit=%d stdout=%q stderr=%q; want %q", test.expression, code, stdout, stderr, want)
 				}
 				stdout, stderr, code = run(test.expression, strconv.Itoa(runtime.NumCPU()+1))
 				if code != 0 || stdout != "" {

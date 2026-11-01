@@ -37,7 +37,8 @@ func TestRunFileAliasesWithPipes(t *testing.T) {
 	if input.aliases(output) || output.aliases(input) {
 		t.Fatal("independent pipes were identified as the same file")
 	}
-	if runtime.GOOS != "windows" && !input.aliases(inspect(writer)) {
+	// macOS gives each pipe endpoint its own inode; compare the same endpoint.
+	if runtime.GOOS != "windows" && !input.aliases(inspect(reader)) {
 		t.Fatal("Unix pipe identity was lost")
 	}
 }
