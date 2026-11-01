@@ -1,3 +1,6 @@
+- rush v0.11.1
+    - Limit concurrency on Unix by the open-file limit, reserving descriptors for pipes, process handles, and buffered retry output to prevent `too many open files` failures.
+    - Close each `-i/--infile` input after reading it instead of keeping all input files open until exit.
 - rush v0.11.0
     - **Add `--delay`, `--load`, and `--memfree` to stagger job starts and limit starts by system load or available memory**. Under severe memory pressure, stop and retry the youngest job without using its retry allowance. [#65](https://github.com/shenwei356/rush/issues/65)
     - **Add `--pipe` to send each `-n` record batch to the command's standard input**, preserving terminating record delimiters and replaying the batch for retries. `--continue` distinguishes batches by their input digest. [#22](https://github.com/shenwei356/rush/issues/22)

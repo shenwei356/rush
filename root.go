@@ -139,6 +139,13 @@ Preset variable (macro):
      $ echo a/b/c.txt.gz | rush -v 'p={%%:}' 'echo {p} {p}.csv'
      c c.csv
 
+Resource limits:
+  On Unix, rush reduces concurrency when needed to fit its open-file limit,
+  reserving descriptors for pipes, process handles, and buffered retry output.
+  A warning reports the reduced job count. If even one job cannot fit, rush
+  reports an error; raise ulimit -n or reduce --retries.
+  Child programs' own file and thread limits still apply.
+
 `, VERSION),
 	Run: func(cmd *cobra.Command, args []string) {
 		process.Log = log
@@ -333,7 +340,6 @@ Preset variable (macro):
 		anyCommands := false
 
 		var inputlines []inputRecord
-	READ_INPUT:
 		for _, file := range config.Infiles {
 			if runCtx.Err() != nil {
 				break
@@ -345,7 +351,6 @@ Preset variable (macro):
 			} else {
 				infh, err = openInputFile(file)
 				checkError(err)
-				defer infh.Close()
 			}
 			scanner := bufio.NewScanner(newInputReader(infh, runCtx))
 			inputCloserDone := make(chan struct{})
@@ -363,15 +368,11 @@ Preset variable (macro):
 			scanner.Split(split)
 
 			for scanner.Scan() {
-				select {
-				case <-runCtx.Done():
+				if runCtx.Err() != nil {
 					if config.Verbose {
 						log.Warningf("cancel reading file: %s", file)
 					}
-					close(inputCloserDone)
-					<-inputCloserExited
-					break READ_INPUT
-				default:
+					break
 				}
 				record := scanner.Text()
 				terminated := false
@@ -383,6 +384,14 @@ Preset variable (macro):
 			}
 			close(inputCloserDone)
 			<-inputCloserExited
+			// All input is read before scheduling. Release each file now rather
+			// than retaining one descriptor per -i argument until rush exits.
+			if !isStdin(file) {
+				closeErr := infh.Close()
+				if closeErr != nil && runCtx.Err() == nil {
+					checkError(errors.Wrap(closeErr, "close input file"))
+				}
+			}
 			if scanErr := scanner.Err(); scanErr != nil && runCtx.Err() == nil {
 				state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
 				checkError(errors.Wrap(scanErr, "read input data"))

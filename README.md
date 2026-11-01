@@ -266,6 +266,13 @@ Preset variable (macro):
      $ echo a/b/c.txt.gz | rush -v 'p={%:}' 'echo {p} {p}.csv'
      c c.csv
 
+Resource limits:
+  On Unix, rush reduces concurrency when needed to fit its open-file limit,
+  reserving descriptors for pipes, process handles, and buffered retry output.
+  A warning reports the reduced job count. If even one job cannot fit, rush
+  reports an error; raise ulimit -n or reduce --retries.
+  Child programs' own file and thread limits still apply.
+
 Usage:
   rush [flags] [command] 
 
@@ -389,6 +396,17 @@ absolute threshold. `--memfree 1G` waits until at least 1 GiB of physical memory
 is available. Uppercase size suffixes use powers of 1024, and lowercase suffixes
 use powers of 1000. These limits apply to starts and retries; `-j` still caps
 the number of concurrent jobs.
+
+On Unix, rush also limits concurrency to leave room for its pipes, process
+handles, and output temporary files. It counts existing open files where
+`/dev/fd` is available and includes output retained across retries in the budget.
+It warns when this reduces the requested job count. If the budget cannot fit
+one job, it exits with an error; increase `ulimit -n` or reduce `--retries`.
+`-I` does not reserve retry output files, and `--dry-run` skips this budget.
+The `{?}` replacement continues to use the requested `-j` value.
+This protects rush's descriptors; child programs may still exhaust their own
+file, process, or thread limits. For multithreaded commands, set both `-j` and
+the program's thread count to suit the available resources.
 
 If available memory falls below half the `--memfree` threshold, rush stops the
 youngest running job and places it back in the queue. Its buffered standard

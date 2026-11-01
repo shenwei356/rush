@@ -783,20 +783,28 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 		state, ctx = runstate.New(parent)
 	}
 	opts.state = state
+	jobs, limitErr := fileDescriptorJobLimit(opts)
+	if limitErr != nil {
+		// Keep the result channels usable so callers can observe setup failure.
+		jobs = 1
+	}
 	controller, controllerErr := makeProcessController(opts)
+	if limitErr != nil {
+		controllerErr = limitErr
+	}
 	opts.controller = controller
 	opts.gate = nil
 	if opts.StartDelay > 0 || opts.MaxLoad > 0 || opts.MinFreeMemory > 0 {
 		opts.gate = newStartGate(ctx, opts, state)
 	}
-	commands := make(chan *Command, opts.Jobs)
-	success := make(chan string, opts.Jobs)
+	commands := make(chan *Command, jobs)
+	success := make(chan string, jobs)
 	done := make(chan int, 1)
 	var statuses chan int
 	if opts.PropExitStatus {
-		statuses = make(chan int, opts.Jobs)
+		statuses = make(chan int, jobs)
 	}
-	results := make(chan runResult, opts.Jobs)
+	results := make(chan runResult, jobs)
 	type outputCompletion struct {
 		sequence uint64
 		err      error
@@ -806,13 +814,14 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 		outputComplete        bool
 		outputFailureReported bool
 	}
-	outputCompletions := make(chan outputCompletion, opts.Jobs)
+	outputCompletions := make(chan outputCompletion, jobs)
 	go func() {
 		defer func() { done <- 1; close(done) }()
 		if opts.gate != nil {
 			defer opts.gate.close()
 		}
 		if controllerErr != nil {
+			Log.Error(controllerErr)
 			state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
 			if controller != nil {
 				_ = controller.Close()
@@ -888,7 +897,7 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 			}()
 		}
 		for inputOpen || inflight > 0 || len(retryQueue) > 0 {
-			if len(retryQueue) > 0 && inflight < opts.Jobs && !cancelled && ctx.Err() == nil {
+			if len(retryQueue) > 0 && inflight < jobs && !cancelled && ctx.Err() == nil {
 				task := retryQueue[0]
 				retryQueue[0] = nil
 				retryQueue = retryQueue[1:]
@@ -910,7 +919,7 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 				break
 			}
 			var inputCh <-chan T
-			if inputOpen && !cancelled && inflight < opts.Jobs && len(retryQueue) == 0 {
+			if inputOpen && !cancelled && inflight < jobs && len(retryQueue) == 0 {
 				inputCh = input
 			}
 			var resultCh <-chan runResult

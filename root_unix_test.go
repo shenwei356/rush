@@ -15,6 +15,131 @@ import (
 	"time"
 )
 
+// lowFileLimitCommand applies both limits before exec so the Go runtime cannot
+// raise the soft limit again. The parent test process keeps its original limit.
+func lowFileLimitCommand(t *testing.T, stdin string, args ...string) *exec.Cmd {
+	t.Helper()
+	cmd := rushTestCommand(t, stdin, args...)
+	cmd.Args = append([]string{"sh", "-c", `ulimit -n 64 && exec "$@"`, "sh"}, cmd.Args...)
+	var err error
+	cmd.Path, err = exec.LookPath("sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cmd
+}
+
+func TestLowFileLimitConcurrentCommands(t *testing.T) {
+	const count = 48
+	var input strings.Builder
+	for i := 1; i <= count; i++ {
+		fmt.Fprintln(&input, i)
+	}
+	for _, mode := range []string{"buffered", "immediate", "pipe", "spill", "inherited"} {
+		t.Run(mode, func(t *testing.T) {
+			args := []string{"-j", "48", "-k"}
+			command := `sleep 0.05; printf '%s\n' {} | cat | cat`
+			want := input.String()
+			switch mode {
+			case "immediate":
+				args = append(args, "-I")
+			case "pipe":
+				args = append(args, "--pipe")
+				command = `sleep 0.05; cat | cat | cat`
+			case "spill":
+				// Slow the first job to retain later jobs' spill files under -k.
+				command = `if [ {} = 1 ]; then sleep 0.2; fi; head -c 1100000 /dev/zero; echo {}`
+				var expected strings.Builder
+				for i := 1; i <= count; i++ {
+					expected.WriteString(strings.Repeat("\x00", 1100000))
+					fmt.Fprintln(&expected, i)
+				}
+				want = expected.String()
+			}
+			cmd := lowFileLimitCommand(t, input.String(), append(args, command)...)
+			if mode == "inherited" {
+				f, err := os.Open(os.DevNull)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer f.Close()
+				// Each entry becomes a distinct inherited descriptor in rush.
+				for i := 0; i < 24; i++ {
+					cmd.ExtraFiles = append(cmd.ExtraFiles, f)
+				}
+			}
+			waitForRush(t, cmd, 15*time.Second)
+			stderr := cmd.Stderr.(*lockedBuffer).String()
+			if cmd.ProcessState.ExitCode() != 0 || strings.Contains(stderr, "too many open files") {
+				t.Fatalf("exit=%d stderr=%s", cmd.ProcessState.ExitCode(), stderr)
+			}
+			got := cmd.Stdout.(*lockedBuffer).String()
+			if mode == "immediate" {
+				assertLineSet(t, got, strings.Fields(input.String()))
+			} else if got != want {
+				t.Fatalf("output differs: got %d bytes, want %d", len(got), len(want))
+			}
+		})
+	}
+}
+
+func TestLowFileLimitRetryOutput(t *testing.T) {
+	// Failed attempts retain spill files until the logical job finishes. More
+	// than one such job would exceed this limit without a retry-aware budget.
+	cmd := lowFileLimitCommand(t, "1\n2\n3\n", "-j", "3", "-k", "-r", "24",
+		`sleep 0.01; head -c 1100000 /dev/zero; echo {}; exit 7`)
+	waitForRush(t, cmd, 15*time.Second)
+	stderr := cmd.Stderr.(*lockedBuffer).String()
+	if cmd.ProcessState.ExitCode() != 7 || strings.Contains(stderr, "too many open files") {
+		t.Fatalf("exit=%d stderr=%s", cmd.ProcessState.ExitCode(), stderr)
+	}
+	got := cmd.Stdout.(*lockedBuffer).String()
+	for i := 1; i <= 3; i++ {
+		block := strings.Repeat("\x00", 1100000) + strconv.Itoa(i) + "\n"
+		for attempt := 0; attempt < 25; attempt++ {
+			if !strings.HasPrefix(got, block) {
+				t.Fatalf("missing or changed output for job %d attempt %d", i, attempt+1)
+			}
+			got = got[len(block):]
+		}
+	}
+	if len(got) != 0 {
+		t.Fatalf("unexpected extra output: %d bytes", len(got))
+	}
+}
+
+func TestLowFileLimitInsufficientBudget(t *testing.T) {
+	cmd := lowFileLimitCommand(t, "x\n", "-j", "1", "-r", "100", "echo must-not-start")
+	waitForRush(t, cmd, 5*time.Second)
+	if cmd.ProcessState.ExitCode() != 1 || cmd.Stdout.(*lockedBuffer).String() != "" ||
+		!strings.Contains(cmd.Stderr.(*lockedBuffer).String(), "open-file limit (64) is too low") {
+		t.Fatalf("exit=%d stderr=%s", cmd.ProcessState.ExitCode(), cmd.Stderr.(*lockedBuffer).String())
+	}
+	for _, flag := range []string{"-I", "--dry-run"} {
+		cmd = lowFileLimitCommand(t, "x\n", "-j", "1", "-r", "100", flag, "echo {}")
+		waitForRush(t, cmd, 5*time.Second)
+		if cmd.ProcessState.ExitCode() != 0 || !strings.Contains(cmd.Stdout.(*lockedBuffer).String(), "x\n") {
+			t.Fatalf("%s: exit=%d stderr=%s", flag, cmd.ProcessState.ExitCode(), cmd.Stderr.(*lockedBuffer).String())
+		}
+	}
+}
+
+func TestLowFileLimitManyInputFiles(t *testing.T) {
+	path := t.TempDir() + "/input"
+	if err := os.WriteFile(path, []byte("x\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-j", "1", "-k"}
+	for i := 0; i < 100; i++ {
+		args = append(args, "-i", path)
+	}
+	cmd := lowFileLimitCommand(t, "", append(args, "echo {}")...)
+	waitForRush(t, cmd, 10*time.Second)
+	if cmd.ProcessState.ExitCode() != 0 || cmd.Stdout.(*lockedBuffer).String() != strings.Repeat("x\n", 100) {
+		t.Fatalf("exit=%d stderr=%s", cmd.ProcessState.ExitCode(), cmd.Stderr.(*lockedBuffer).String())
+	}
+}
+
 func TestStopOnErrorExits(t *testing.T) {
 	cmd := rushTestCommand(t,
 		strings.Repeat("x\n", 8),
