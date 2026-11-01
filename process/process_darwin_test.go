@@ -7,7 +7,23 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
+
+func TestDarwinProcessNameStopsAtNUL(t *testing.T) {
+	var item unix.KinfoProc
+	// exec can replace a longer name without clearing bytes after the new NUL.
+	copy(item.Proc.P_comm[:], "process.testr")
+	copy(item.Proc.P_comm[:], "sleep\x00")
+	p := darwinProcess(&item)
+	if p.name != "sleep" {
+		t.Fatalf("process name=%q; want sleep", p.name)
+	}
+	if allowed, err := canSendSignal(p.name, []string{"sleep"}); err != nil || allowed {
+		t.Fatalf("exclusion did not match: allowed=%t err=%v", allowed, err)
+	}
+}
 
 func TestDarwinProcessIdentityMatchesSnapshot(t *testing.T) {
 	pid := os.Getpid()

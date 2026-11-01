@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+func TestBSDProcessNameStopsAtNUL(t *testing.T) {
+	// Include surrounding fields and stale bytes after the terminator.
+	record := []byte("prefixsleep\x00s.testr\x00suffix")
+	name := bsdName(record, 6, 14)
+	if name != "sleep" {
+		t.Fatalf("process name=%q; want sleep", name)
+	}
+	if allowed, err := canSendSignal(name, []string{"sleep"}); err != nil || allowed {
+		t.Fatalf("exclusion did not match: allowed=%t err=%v", allowed, err)
+	}
+}
+
 func TestBSDProcessIdentityMatchesSnapshot(t *testing.T) {
 	pid := os.Getpid()
 	first, err := lookupPlatformProcess(pid)

@@ -12,6 +12,36 @@ import (
 	"github.com/spf13/pflag"
 )
 
+func TestRunFileAliasesWithPipes(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	otherReader, otherWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherReader.Close()
+	defer otherWriter.Close()
+	inspect := func(file *os.File) runFile {
+		t.Helper()
+		f, err := inspectRunFile("stream", "", file, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	input, output := inspect(reader), inspect(otherWriter)
+	if input.aliases(output) || output.aliases(input) {
+		t.Fatal("independent pipes were identified as the same file")
+	}
+	if runtime.GOOS != "windows" && !input.aliases(inspect(writer)) {
+		t.Fatal("Unix pipe identity was lost")
+	}
+}
+
 func FuzzDiagnosticConfigMatchesParsedFlags(f *testing.F) {
 	for _, args := range [][]string{
 		{},

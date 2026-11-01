@@ -3,7 +3,6 @@
 package process
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -49,6 +48,7 @@ func lookupPlatformProcess(pid int) (platformProcess, error) {
 	return p, nil
 }
 
+// darwinProcess stops p_comm at its first NUL; exec may leave stale bytes after it.
 func darwinProcess(item *unix.KinfoProc) platformProcess {
 	start := item.Proc.P_starttime
 	return platformProcess{
@@ -56,7 +56,7 @@ func darwinProcess(item *unix.KinfoProc) platformProcess {
 		ppid:     int(item.Eproc.Ppid),
 		pgid:     int(item.Eproc.Pgid),
 		identity: uint64(start.Sec)*1_000_000 + uint64(start.Usec),
-		name:     string(bytes.TrimRight(item.Proc.P_comm[:], "\x00")),
+		name:     unix.ByteSliceToString(item.Proc.P_comm[:]),
 		zombie:   item.Proc.P_stat == 5, // SZOMB in sys/proc.h
 	}
 }

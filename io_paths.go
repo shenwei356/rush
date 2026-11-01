@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -226,6 +227,11 @@ func (f runFile) aliases(other runFile) bool {
 		return false
 	}
 	if f.info != nil && other.info != nil {
+		// Windows pipe Stat results lack file IDs, so SameFile can equate
+		// unrelated pipes. Keep identity checks for Unix pipes and disk files.
+		if runtime.GOOS == "windows" && (f.info.Mode()|other.info.Mode())&os.ModeNamedPipe != 0 {
+			return false
+		}
 		return os.SameFile(f.info, other.info)
 	}
 	return f.parent != nil && other.parent != nil &&

@@ -3,7 +3,6 @@
 package process
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -87,6 +86,7 @@ func bsdUint64(record []byte, offset uintptr) uint64 {
 	return binary.LittleEndian.Uint64(record[offset:])
 }
 
+// bsdName ignores stale bytes after the kernel name's terminating NUL.
 func bsdName(record []byte, offset, length uintptr) string {
-	return string(bytes.TrimRight(record[offset:offset+length], "\x00"))
+	return unix.ByteSliceToString(record[offset : offset+length])
 }
