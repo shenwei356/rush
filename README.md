@@ -102,6 +102,8 @@ Performance of `rush` is similar to `gargs`, and they are both slightly faster t
 
 Note that speed is not the #.1 target, especially for processes that last long.
 
+`python3 benchmark.py` requires Bash, `seq`, `md5sum`, and the programs listed in the script.
+
 
 ## Installation
 

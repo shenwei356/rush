@@ -14,6 +14,27 @@ import (
 	"time"
 )
 
+func TestLinuxProcessExitSnapshot(t *testing.T) {
+	for _, state := range []string{"S", "Z", "X", "x"} {
+		t.Run(state, func(t *testing.T) {
+			group := "7"
+			dead := state == "X" || state == "x"
+			if dead {
+				group = "-1" // A reaped task can lose its process-group mapping.
+			}
+			data := []byte("7 (worker (old)) " + state + " 1 " + group + strings.Repeat(" 0", 16) + " 99")
+			p, err := parseLinuxProcessStat(7, data)
+			if dead {
+				if !unixProcessGone(err) {
+					t.Fatalf("dead snapshot treated as an identity failure: process=%+v err=%v", p, err)
+				}
+			} else if err != nil || p.pid != 7 || p.pgid != 7 || p.identity != 99 || p.zombie != (state == "Z") {
+				t.Fatalf("live/zombie identity was lost: process=%+v err=%v", p, err)
+			}
+		})
+	}
+}
+
 func TestLinuxLongExecutableExclusions(t *testing.T) {
 	sleepPath, err := exec.LookPath("sleep")
 	if err != nil {

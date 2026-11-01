@@ -22,7 +22,9 @@ jobs:
       - run: go test ./...
       - if: runner.os == 'Linux'
         shell: bash
-        run: bash tests/test1.sh
+        run: |
+          bash tests/test1.sh
+          python3 -m unittest discover -s tests -p 'test_*.py'
       - if: runner.os == 'Windows'
         shell: pwsh
         run: go test ./... -run 'TestWindows'

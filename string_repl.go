@@ -31,8 +31,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/shenwei356/util/stringutil"
 )
 
 var rePlaceHolder = regexp.MustCompile(`\{([^\{\}}]*)\}`)
@@ -135,6 +133,28 @@ func fillCommandForContinue(config Config, command string, chunk Chunk, nRemaini
 	return s, nil
 }
 
+// escapeSymbols inserts backslashes while preserving the original input bytes.
+func escapeSymbols(text, symbols string) string {
+	escape := make(map[rune]struct{})
+	for _, symbol := range symbols {
+		escape[symbol] = struct{}{}
+	}
+	var escaped strings.Builder
+	start := 0
+	for i, symbol := range text {
+		if _, ok := escape[symbol]; ok {
+			escaped.WriteString(text[start:i])
+			escaped.WriteByte('\\')
+			start = i
+		}
+	}
+	if escaped.Len() == 0 {
+		return text
+	}
+	escaped.WriteString(text[start:])
+	return escaped.String()
+}
+
 // escapeContinueCommand escapes command text while preserving internal tokens
 // and the record prefix, even when --escape-symbols includes their characters.
 func escapeContinueCommand(record, symbols string) string {
@@ -143,7 +163,7 @@ func escapeContinueCommand(record, symbols string) string {
 		prefix = continueComposedCommandPrefix
 	}
 	if !strings.HasPrefix(record, prefix) {
-		return stringutil.EscapeSymbols(record, symbols)
+		return escapeSymbols(record, symbols)
 	}
 	body := strings.TrimPrefix(record, prefix)
 	var escaped strings.Builder
@@ -151,11 +171,11 @@ func escapeContinueCommand(record, symbols string) string {
 	start := 0
 	markers := reContinueMarker.FindAllStringIndex(body, -1)
 	for _, bounds := range markers {
-		escaped.WriteString(stringutil.EscapeSymbols(body[start:bounds[0]], symbols))
+		escaped.WriteString(escapeSymbols(body[start:bounds[0]], symbols))
 		escaped.WriteString(body[bounds[0]:bounds[1]])
 		start = bounds[1]
 	}
-	escaped.WriteString(stringutil.EscapeSymbols(body[start:], symbols))
+	escaped.WriteString(escapeSymbols(body[start:], symbols))
 	if len(markers) > 0 {
 		// Normalized markers hide their numeric values. Retain the digit escape
 		// policy so changing it cannot silently skip a different shell command.

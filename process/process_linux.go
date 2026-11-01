@@ -34,6 +34,11 @@ func readLinuxProcess(pid int) (platformProcess, error) {
 	if err != nil {
 		return platformProcess{}, err
 	}
+	return parseLinuxProcessStat(pid, data)
+}
+
+// parseLinuxProcessStat decodes one snapshot, which may race with process exit.
+func parseLinuxProcessStat(pid int, data []byte) (platformProcess, error) {
 	text := string(data)
 	left, right := strings.IndexByte(text, '('), strings.LastIndex(text, ") ")
 	if left < 0 || right <= left {
@@ -42,6 +47,10 @@ func readLinuxProcess(pid int) (platformProcess, error) {
 	fields := strings.Fields(text[right+2:])
 	if len(fields) <= 19 {
 		return platformProcess{}, fmt.Errorf("short /proc/%d/stat", pid)
+	}
+	// A dead task may still be readable after its process-group mapping is gone.
+	if fields[0] == "X" || fields[0] == "x" {
+		return platformProcess{}, os.ErrNotExist
 	}
 	ppid, err := strconv.Atoi(fields[1])
 	if err != nil {

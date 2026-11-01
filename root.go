@@ -38,7 +38,6 @@ import (
 	pb "github.com/schollz/progressbar/v3"
 	"github.com/shenwei356/rush/internal/runstate"
 	"github.com/shenwei356/rush/process"
-	"github.com/shenwei356/util/stringutil"
 	"github.com/shenwei356/xopen"
 	"github.com/spf13/cobra"
 )
@@ -633,7 +632,7 @@ Resource limits:
 					}
 				}
 				if config.Escape {
-					cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
+					cmdStr = escapeSymbols(cmdStr, config.EscapeSymbols)
 					recordCmd = escapeContinueCommand(recordCmd, config.EscapeSymbols)
 				}
 				stdin := ""

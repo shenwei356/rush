@@ -647,12 +647,15 @@ func TestBufferedStderrFailureSurvivesNonzeroExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer readOnly.Close()
+	// Let the command reach exit 9; an early output error may otherwise stop it first.
 	opts := &Options{
 		Jobs:                1,
 		OutFileHandle:       os.Stdout,
 		ErrFileHandle:       readOnly,
 		PropExitStatus:      true,
 		RecordSuccessfulCmd: true,
+		NoStopExes:          []string{"all"},
+		NoKillExes:          []string{"all"},
 	}
 	got := observeRun(t, opts, "printf error >&2; exit 9")
 	if got.cause != (runstate.Cause{Kind: runstate.Internal, Status: 1}) {

@@ -201,6 +201,11 @@ func TestMemoryDiscardReadFailureReportsCleanupErrors(t *testing.T) {
 			var logs bytes.Buffer
 			Log = logging.MustGetLogger("memory-discard-errors")
 			Log.SetBackend(logging.AddModuleLevel(logging.NewLogBackend(&logs, "", 0)))
+			t.Cleanup(func() {
+				if t.Failed() {
+					t.Logf("run diagnostics:\n%s", logs.String())
+				}
+			})
 			var free atomic.Uint64
 			free.Store(200)
 			availableMemory = func() (uint64, uint64, error) { return free.Load(), 400, nil }

@@ -84,6 +84,33 @@ func TestInputReplacementsPreserveBraces(t *testing.T) {
 	}
 }
 
+func TestEscapeSymbols(t *testing.T) {
+	for _, test := range []struct{ input, symbols, want string }{
+		{"a$\\", "$\\", "a\\$\\\\"},
+		{"é$\xff", "é$", "\\é\\$\xff"},
+		{"$\xff", "$$", "\\$\xff"},
+		{"raw\xff", "", "raw\xff"},
+	} {
+		if got := escapeSymbols(test.input, test.symbols); got != test.want {
+			t.Errorf("input=%q symbols=%q: got %q; want %q", test.input, test.symbols, got, test.want)
+		}
+	}
+}
+
+func TestEscapedInputPreservesBytes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows command lines use UTF-16")
+	}
+	input := "file\xff.txt\n"
+	args := []string{"-q", "-c", "-C", t.TempDir() + "/records", `printf '%s\n' '{}'`}
+	for _, want := range []string{input, ""} {
+		stdout, stderr, code := runLegacyRush(t, input, nil, args...)
+		if code != 0 || stdout != want {
+			t.Fatalf("exit=%d stdout=%q stderr=%q; want %q", code, stdout, stderr, want)
+		}
+	}
+}
+
 func TestContinueTracksJobValuesThroughMacroPasses(t *testing.T) {
 	for _, test := range []struct {
 		name, command, close, actual, key string
