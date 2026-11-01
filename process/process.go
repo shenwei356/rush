@@ -159,11 +159,15 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 		}
 	}
 	if startErr != nil {
+		// Registration can fail after Start has already begun copying output.
+		// Both launch paths wait for that copier before returning the error.
+		c.tmpfh, c.tmpfile = spill.file, spill.name
+		c.outputErr = combineErrors(spill.err, firstWriterError(stdout, stderr), c.Cleanup())
 		close(ch)
-		completeOutput(nil)
+		completeOutput(c.outputErr)
 		close(c.Executed)
 		c.exitStatus = 1
-		c.Err = fmt.Errorf("start cmd #%d: %w", c.ID, startErr)
+		c.Err = combineErrors(fmt.Errorf("start cmd #%d: %w", c.ID, startErr), c.outputErr)
 		return ch, c.Err
 	}
 	defer controller.Finished(command)
@@ -213,6 +217,14 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	case <-timeout:
 		terminal = stopCommand(ErrTimeout)
 		waitErr = <-waited
+	}
+	if terminal == nil && waitErr != nil {
+		// Wait can return while descendants still hold pipes or keep running.
+		// Stop them before Finished removes the record or a retry starts. A
+		// nonzero shell status can hide ErrWaitDelay, so handle every wait error.
+		if cleanupErr := stopCommand(nil); cleanupErr != nil {
+			waitErr = errors.Join(waitErr, cleanupErr)
+		}
 	}
 	c.exitStatus = command.ProcessState.ExitCode()
 	if errors.Is(terminal, ErrTimeout) {
@@ -721,7 +733,8 @@ func Run4OutputContextJobs(opts *Options, ctx context.Context, stop context.Canc
 
 func run4OutputContext[T commandInput](opts *Options, ctx context.Context, stop context.CancelFunc, input chan T) (chan string, chan string, chan int, chan int) {
 	commands, success, commandDone, statuses := runContext(opts, ctx, stop, input)
-	out := make(chan string, max(1, opts.Jobs))
+	// The command channel already uses the effective file-descriptor budget.
+	out := make(chan string, cap(commands))
 	done := make(chan int, 1)
 	go func() {
 		defer func() { close(out); done <- 1; close(done) }()
@@ -1087,7 +1100,7 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 			Log.Error("stop on first error")
 			return finish(false, status, nil)
 		}
-		if errors.Is(err, ErrCancelled) || attempt == opts.Retries {
+		if errors.Is(err, ErrCancelled) || ctx.Err() != nil || attempt == opts.Retries {
 			Log.Error(err)
 			return finish(false, command.exitStatus, nil)
 		}

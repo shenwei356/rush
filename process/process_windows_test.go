@@ -12,6 +12,14 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+func TestWindowsExitedCommandCleanupPreservesRetries(t *testing.T) {
+	opts := &Options{Jobs: 1, Retries: 1, PropExitStatus: true, CleanupTime: 0}
+	got := observeRun(t, opts, "exit /b 7")
+	if len(got.commands) != 1 || len(got.statuses) != 1 || got.statuses[0] != 7 || got.cause.Status != 0 {
+		t.Fatalf("commands=%d, statuses=%v, cause=%v; want child exit status 7", len(got.commands), got.statuses, got.cause)
+	}
+}
+
 func TestWindowsExclusionsDoNotSignalOrKill(t *testing.T) {
 	opts := &Options{NoStopExes: []string{"all"}, NoKillExes: []string{"all"}}
 	controller, err := newPlatformProcessController(opts)

@@ -140,11 +140,13 @@ Preset variable (macro):
      c c.csv
 
 Resource limits:
-  On Unix, rush reduces concurrency when needed to fit its open-file limit,
-  reserving descriptors for pipes, process handles, and buffered retry output.
-  A warning reports the reduced job count. If even one job cannot fit, rush
-  reports an error; raise ulimit -n or reduce --retries.
-  Child programs' own file and thread limits still apply.
+  - On Unix, rush reduces concurrency when needed to fit its open-file limit,
+    reserving descriptors for pipes, process handles, and buffered retry output.
+    A warning reports the reduced job count. If even one job cannot fit, rush
+    reports an error; raise ulimit -n or reduce --retries.
+  - Child programs' own file and thread limits still apply.
+  - A failed command's remaining child processes are stopped before retrying.
+    Shell commands that launch background work should wait for it before exiting.
 
 `, VERSION),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -165,9 +167,9 @@ Resource limits:
 			checkError(fmt.Errorf(`STDIN not detected. type "rush -h" for help`))
 		}
 
-		j := config.Jobs + 1
-		if j > runtime.NumCPU() {
-			j = runtime.NumCPU()
+		j := runtime.NumCPU()
+		if config.Jobs < j {
+			j = config.Jobs + 1
 		}
 		runtime.GOMAXPROCS(j)
 

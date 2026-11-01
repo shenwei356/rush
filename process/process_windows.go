@@ -234,8 +234,14 @@ func (c *windowsController) stop(root windowsRecord, cleanup time.Duration, forc
 		return err
 	}
 	known := map[uint32]windowsProcess{root.pid: {pid: root.pid, identity: root.identity, name: root.name}}
-	if err := refreshWindowsTree(root, known); err != nil {
+	alive, err := refreshAndCheckWindowsTree(root, known)
+	if err != nil {
 		return err
+	}
+	// An ordinary failed command may already have no surviving descendants.
+	// Do not send a console event to its now-empty process group.
+	if !alive {
+		return nil
 	}
 	var gracefulErr error
 	sendBreak, _ := canSendSignal(root.name, c.opts.NoStopExes)

@@ -267,11 +267,13 @@ Preset variable (macro):
      c c.csv
 
 Resource limits:
-  On Unix, rush reduces concurrency when needed to fit its open-file limit,
-  reserving descriptors for pipes, process handles, and buffered retry output.
-  A warning reports the reduced job count. If even one job cannot fit, rush
-  reports an error; raise ulimit -n or reduce --retries.
-  Child programs' own file and thread limits still apply.
+  - On Unix, rush reduces concurrency when needed to fit its open-file limit,
+    reserving descriptors for pipes, process handles, and buffered retry output.
+    A warning reports the reduced job count. If even one job cannot fit, rush
+    reports an error; raise ulimit -n or reduce --retries.
+  - Child programs' own file and thread limits still apply.
+  - A failed command's remaining child processes are stopped before retrying.
+    Shell commands that launch background work should wait for it before exiting.
 
 Usage:
   rush [flags] [command] 
@@ -402,7 +404,9 @@ handles, and output temporary files. It counts existing open files where
 `/dev/fd` is available and includes output retained across retries in the budget.
 It warns when this reduces the requested job count. If the budget cannot fit
 one job, it exits with an error; increase `ulimit -n` or reduce `--retries`.
-`-I` does not reserve retry output files, and `--dry-run` skips this budget.
+`-I` and `-e/--stop-on-error` do not reserve files for earlier retry attempts:
+`-I` writes output immediately, and `-e` stops on the first failure without
+retrying. `--dry-run` skips this budget.
 The `{?}` replacement continues to use the requested `-j` value.
 This protects rush's descriptors; child programs may still exhaust their own
 file, process, or thread limits. For multithreaded commands, set both `-j` and
@@ -661,6 +665,13 @@ limits imposed on a container may differ from the reported available memory.
         23:16:30.741 [ERRO] cancelled
         23:16:30.741 [ERRO] cancelled
 
+
+    A failed command's remaining child processes are also stopped before a retry
+    or final failure. If a shell exits while descendants keep its output pipes
+    open, rush allows five seconds for the pipes to drain before failing the
+    attempt and cleaning up those descendants. Commands that launch background
+    work should wait for the child before the shell exits, for example
+    `rush 'program {} & wait "$!"'`.
 
 1. Continue/resume jobs (`-c`). When some jobs failed (by execution failure, timeout,
     or cancelling by user with `Ctrl + C`),

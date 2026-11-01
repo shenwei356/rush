@@ -115,12 +115,21 @@ func TestLowFileLimitInsufficientBudget(t *testing.T) {
 		!strings.Contains(cmd.Stderr.(*lockedBuffer).String(), "open-file limit (64) is too low") {
 		t.Fatalf("exit=%d stderr=%s", cmd.ProcessState.ExitCode(), cmd.Stderr.(*lockedBuffer).String())
 	}
-	for _, flag := range []string{"-I", "--dry-run"} {
+	for _, flag := range []string{"-I", "--dry-run", "-e"} {
 		cmd = lowFileLimitCommand(t, "x\n", "-j", "1", "-r", "100", flag, "echo {}")
 		waitForRush(t, cmd, 5*time.Second)
 		if cmd.ProcessState.ExitCode() != 0 || !strings.Contains(cmd.Stdout.(*lockedBuffer).String(), "x\n") {
 			t.Fatalf("%s: exit=%d stderr=%s", flag, cmd.ProcessState.ExitCode(), cmd.Stderr.(*lockedBuffer).String())
 		}
+	}
+}
+
+func TestLowFileLimitHugeJobCount(t *testing.T) {
+	maxInt := strconv.Itoa(int(^uint(0) >> 1))
+	cmd := lowFileLimitCommand(t, "x\n", "-j", maxInt, "echo {}")
+	waitForRush(t, cmd, 5*time.Second)
+	if cmd.ProcessState.ExitCode() != 0 || cmd.Stdout.(*lockedBuffer).String() != "x\n" {
+		t.Fatalf("exit=%d stderr=%s", cmd.ProcessState.ExitCode(), cmd.Stderr.(*lockedBuffer).String())
 	}
 }
 

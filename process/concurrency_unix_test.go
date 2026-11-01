@@ -4,6 +4,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,77 @@ import (
 	"testing"
 	"time"
 )
+
+// registrationFailureController fails after the real stdout copier has opened
+// a spill file, exercising cleanup after Start succeeds but registration fails.
+type registrationFailureController struct {
+	processController
+	created <-chan *os.File
+	file    *os.File
+	err     error
+}
+
+func (c *registrationFailureController) Started(*exec.Cmd) error {
+	select {
+	case c.file = <-c.created:
+		return c.err
+	case <-time.After(time.Second):
+		return errors.New("timed out waiting for spill file")
+	}
+}
+
+func TestRegistrationFailureCleansSpill(t *testing.T) {
+	for _, tc := range []struct{ gated, closeFails bool }{{false, false}, {true, false}, {false, true}} {
+		t.Run(fmt.Sprintf("gated=%t/close-fails=%t", tc.gated, tc.closeFails), func(t *testing.T) {
+			withSpillSeams(t)
+			oldLimit, oldController := TmpOutputDataBuffer, makeProcessController
+			t.Cleanup(func() { TmpOutputDataBuffer, makeProcessController = oldLimit, oldController })
+			TmpOutputDataBuffer = 0
+			dir := t.TempDir()
+			created := make(chan *os.File, 1)
+			createSpillFile = func() (*os.File, error) {
+				file, err := os.CreateTemp(dir, "spill")
+				created <- file
+				return file, err
+			}
+			sentinel := errors.New("registration failed")
+			closeErr := errors.New("spill close failed")
+			if tc.closeFails {
+				closeSpillFile = func(file *os.File) error {
+					return errors.Join(file.Close(), closeErr)
+				}
+			}
+			controller := &registrationFailureController{created: created, err: sentinel}
+			makeProcessController = func(opts *Options) (processController, error) {
+				inner, err := newPlatformProcessController(opts)
+				controller.processController = inner
+				return controller, err
+			}
+			opts := &Options{Jobs: 1, PropExitStatus: true}
+			if tc.gated {
+				opts.StartDelay = time.Millisecond
+			}
+			got := observeRun(t, opts, "printf spilled; while :; do :; done")
+			if len(got.commands) != 1 || !errors.Is(got.commands[0].Err, sentinel) {
+				t.Fatalf("commands=%v; want registration error", got.commands)
+			}
+			if tc.closeFails && (!errors.Is(got.commands[0].outputErr, closeErr) || got.cause.Status != 1) {
+				t.Fatalf("output error=%v, cause=%v; cleanup error was lost", got.commands[0].outputErr, got.cause)
+			}
+			if controller.file == nil {
+				t.Fatal("command did not create a spill file")
+			}
+			defer controller.file.Close()
+			if _, err := controller.file.Stat(); !errors.Is(err, os.ErrClosed) {
+				t.Errorf("spill descriptor not closed: %v", err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("remaining spill files=%d, err=%v", len(entries), err)
+			}
+		})
+	}
+}
 
 func TestKeepOrderPreservesWorkerConcurrency(t *testing.T) {
 	dir := t.TempDir()

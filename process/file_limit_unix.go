@@ -30,9 +30,10 @@ func fileDescriptorJobLimit(opts *Options) (int, error) {
 	const reserve = 16
 	// At peak, Start can need six stdio pipe ends, two exec-error pipe ends,
 	// a process handle, and a spill file. Each earlier attempt can retain one
-	// more spill file; immediate output does not keep those files.
+	// more spill file; immediate output does not keep those files, and
+	// stop-on-error never retries a failed command.
 	perJob := uint64(10)
-	if !opts.ImmediateOutput && opts.Retries > 0 {
+	if !opts.ImmediateOutput && !opts.StopOnErr && opts.Retries > 0 {
 		perJob += uint64(opts.Retries)
 	}
 	if softLimit <= opened+reserve || (softLimit-opened-reserve)/perJob == 0 {
