@@ -69,7 +69,6 @@ type Command struct {
 	outputErr        error
 	Err              error // Read after the run completes; output failures may update it.
 	Duration         time.Duration
-	dryrun           bool
 	cancelled        bool // Cancellation result fixed before publishing to output consumers.
 	exitStatus       int
 	Executed         chan int
@@ -93,6 +92,7 @@ func (c *Command) stopForMemory() bool {
 	return true
 }
 
+// Run executes the command, or returns its text when opts.DryRun is set.
 func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	ch := make(chan string, 1)
 	outputDone := make(chan error, 1)
@@ -113,7 +113,7 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	if isClosed(c.Cancel) {
 		return fail(ErrCancelled)
 	}
-	if c.dryrun {
+	if opts.DryRun {
 		ch <- c.Cmd + "\n"
 		close(ch)
 		completeOutput(nil)
@@ -1208,7 +1208,6 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 		command.recordCmd = task.record
 		command.stdin = task.stdin
 		command.controller = controller
-		command.dryrun = opts.DryRun
 		ch, err := command.Run(opts, attempt+1)
 		if errors.Is(err, ErrMemoryPressure) && ctx.Err() == nil && command.outputErr == nil {
 			// A memory stop is independent of the user's retry budget. Discard

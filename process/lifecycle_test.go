@@ -40,6 +40,26 @@ func (p *trackedParent) AfterFunc(f func()) func() bool {
 	}
 }
 
+func TestStandaloneCommandHonorsDryRun(t *testing.T) {
+	oldController := makeProcessController
+	makeProcessController = func(*Options) (processController, error) {
+		return nil, errors.New("dry run attempted to create a process controller")
+	}
+	t.Cleanup(func() { makeProcessController = oldController })
+	command := NewCommand(1, "echo preview", nil, 0)
+	out, err := command.Run(&Options{DryRun: true}, 1)
+	var output strings.Builder
+	for chunk := range out {
+		output.WriteString(chunk)
+	}
+	if err != nil || output.String() != "echo preview\n" {
+		t.Fatalf("dry run output=%q err=%v", output.String(), err)
+	}
+	if count := <-command.Executed; count != 1 {
+		t.Fatalf("dry run completion=%d; want 1", count)
+	}
+}
+
 func TestContextRunReleasesOwnedContext(t *testing.T) {
 	for _, mode := range []string{"owned", "owned-no-stop", "borrowed"} {
 		t.Run(mode, func(t *testing.T) {
@@ -244,8 +264,7 @@ func TestCommandSetupFailureCompletesNotifications(t *testing.T) {
 			sentinel = ErrCancelled
 		}
 		command := NewCommand(1, "unused", cancel, 0)
-		command.dryrun = dryrun
-		out, err := command.Run(&Options{}, 1)
+		out, err := command.Run(&Options{DryRun: dryrun}, 1)
 		makeProcessController = old
 		if !errors.Is(err, sentinel) || !errors.Is(command.Err, sentinel) || command.exitStatus == 0 {
 			t.Fatalf("Run=%v, command error=%v, status=%d", err, command.Err, command.exitStatus)

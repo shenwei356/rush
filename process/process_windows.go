@@ -22,7 +22,12 @@ const createNewProcessGroup = 0x00000200
 func getShell() string { return "cmd" }
 func getCommand(_ context.Context, qcmd string) *exec.Cmd {
 	cmd := exec.Command(getShell(), "/d", "/s", "/c", qcmd)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup}
+	// cmd.exe does not use CommandLineToArgvW escaping. /s removes only the
+	// outer quotes, leaving the user's quotes and backslashes unchanged.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: createNewProcessGroup,
+		CmdLine:       syscall.EscapeArg(cmd.Path) + ` /d /s /c "` + qcmd + `"`,
+	}
 	return cmd
 }
 

@@ -4,9 +4,12 @@ package process
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +17,60 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+func TestWindowsArgumentHelper(t *testing.T) {
+	if os.Getenv("RUSH_WINDOWS_ARGUMENT_HELPER") != "1" {
+		return
+	}
+	for i, arg := range os.Args {
+		if arg == "--" {
+			if err := json.NewEncoder(os.Stdout).Encode(os.Args[i+1:]); err != nil {
+				os.Exit(2)
+			}
+			os.Exit(0)
+		}
+	}
+	os.Exit(2)
+}
+
+func TestWindowsCommandQuoting(t *testing.T) {
+	for _, tc := range []struct{ command, output string }{
+		{`echo "two words"`, "\"two words\"\r\n"},
+		{`echo C:\path\`, "C:\\path\\\r\n"},
+	} {
+		cmd := getCommand(context.Background(), tc.command)
+		output, err := cmd.CombinedOutput()
+		if err != nil || string(output) != tc.output {
+			t.Errorf("command=%q output=%q err=%v; want %q", tc.command, output, err, tc.output)
+		}
+	}
+
+	// Exercise an actual executable path with spaces, without relying on 8.3 names.
+	dir := t.TempDir()
+	helper := filepath.Join(dir, "argument helper.exe")
+	program, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(helper, program, 0700); err != nil {
+		t.Fatal(err)
+	}
+	outputFile := filepath.Join(dir, "argument output.json")
+	command := fmt.Sprintf(`"%s" -test.run=^TestWindowsArgumentHelper$ -- "two words" "a&b" >"%s"`, helper, outputFile)
+	cmd := getCommand(context.Background(), command)
+	cmd.Env = append(os.Environ(), "RUSH_WINDOWS_ARGUMENT_HELPER=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("quoted executable and redirection failed: %v: %s", err, output)
+	}
+	data, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	if err := json.Unmarshal(data, &args); err != nil || len(args) != 2 || args[0] != "two words" || args[1] != "a&b" {
+		t.Fatalf("arguments changed: %q (error=%v)", data, err)
+	}
+}
 
 // TestWindowsCleanupHelperProcess keeps an owned process alive for cleanup tests.
 func TestWindowsCleanupHelperProcess(t *testing.T) {

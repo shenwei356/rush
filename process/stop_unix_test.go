@@ -413,7 +413,7 @@ func TestUnixGroupSignalPermissionFallsBackToMembers(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		child, err := lookupPlatformProcess(childPID)
-		if errors.Is(err, os.ErrNotExist) || (err == nil && child.zombie) {
+		if unixProcessGone(err) || (err == nil && child.zombie) {
 			return
 		}
 		if err != nil {

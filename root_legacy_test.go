@@ -935,9 +935,7 @@ func runLegacyRush(t *testing.T, stdin string, extraEnv []string, args ...string
 
 func shellQuote(value string) string {
 	if runtime.GOOS == "windows" {
-		// On Windows, don't quote at all - the 8.3 short path format doesn't have spaces
-		// and rush/cmd.exe will handle the path correctly without quotes
-		return value
+		return `"` + value + `"`
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

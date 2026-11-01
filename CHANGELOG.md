@@ -3,8 +3,8 @@
     - Fix child-process cleanup, executable exclusions, and hangs during failures, retries, and interrupts.
     - Fix `--continue` matching, including escaped job values, and concurrent access; reject damaged or ambiguous records and keep dry runs read-only.
     - Reject invalid or conflicting file paths, handle I/O failures promptly, and fix named-pipe output and `--pipe` trimming.
-    - Fix path and placeholder expansion; preserve input braces, undefined variables, unsupported expressions, and non-UTF-8 bytes with `-q`.
-    - Correct timeout/signal exit statuses and retain interrupted retry output.
+    - Fix path/placeholder expansion and Windows command quoting; preserve input braces, undefined variables, unsupported expressions, and non-UTF-8 bytes with `-q`.
+    - Correct timeout/signal exit statuses, retain interrupted retry output, and honor dry runs in the process API.
 - rush v0.11.0
     - **Add `--delay`, `--load`, and `--memfree` to stagger job starts and limit starts by system load or available memory**. Under severe memory pressure, stop and retry the youngest job without using its retry allowance. [#65](https://github.com/shenwei356/rush/issues/65)
     - **Add `--pipe` to send each `-n` record batch to the command's standard input**, preserving terminating record delimiters and replaying the batch for retries. `--continue` distinguishes batches by their input digest. [#22](https://github.com/shenwei356/rush/issues/22)
