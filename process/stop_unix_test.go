@@ -210,24 +210,50 @@ func TestUnixCleanupAfterGroupLeaderExited(t *testing.T) {
 	t.Fatal("command descendant survived after the group leader exited")
 }
 
+func TestWaitProcessPIDFileWaitsForCompleteRecord(t *testing.T) {
+	for _, initial := range []string{"", "123"} {
+		t.Run(fmt.Sprintf("initial=%q", initial), func(t *testing.T) {
+			path := t.TempDir() + "/pid"
+			if err := os.WriteFile(path, []byte(initial), 0600); err != nil {
+				t.Fatal(err)
+			}
+			written := make(chan error, 1)
+			go func() {
+				// Model the gap between creating a PID file and completing it.
+				time.Sleep(50 * time.Millisecond)
+				written <- os.WriteFile(path, []byte("12345\n"), 0600)
+			}()
+			defer func() {
+				if err := <-written; err != nil {
+					t.Error(err)
+				}
+			}()
+			if pid := waitProcessPIDFile(t, path); pid != 12345 {
+				t.Fatalf("read incomplete PID: got %d; want 12345", pid)
+			}
+		})
+	}
+}
+
+// waitProcessPIDFile waits for echo's newline, not just the shell's file creation.
 func waitProcessPIDFile(t *testing.T, path string) int {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
-		if err == nil {
+		if err == nil && len(data) > 0 && data[len(data)-1] == '\n' {
 			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 			if err != nil {
 				t.Fatal(err)
 			}
 			return pid
 		}
-		if !os.IsNotExist(err) {
+		if err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("child PID was not recorded")
+	t.Fatal("complete child PID was not recorded")
 	return 0
 }
 

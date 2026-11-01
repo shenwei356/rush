@@ -687,16 +687,7 @@ func TestCleanupCatchesDescendantCreatedBySignalHandler(t *testing.T) {
 
 func waitForPIDFile(t *testing.T, path string, timeout time.Duration) int {
 	t.Helper()
-	waitForFile(t, path, timeout)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		t.Fatalf("parse child pid: %v", err)
-	}
-	return pid
+	return waitUnixPIDFile(t, path, timeout)
 }
 
 func waitForFile(t *testing.T, path string, timeout time.Duration) {
