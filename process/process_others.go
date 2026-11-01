@@ -21,6 +21,15 @@ func getCommand(_ context.Context, qcmd string) *exec.Cmd {
 	return cmd
 }
 
+// ownedCommandName follows exec replacements of the original shell process.
+func ownedCommandName(cmd *exec.Cmd) (string, error) {
+	p, err := lookupPlatformProcess(cmd.Process.Pid)
+	if err != nil {
+		return "", err
+	}
+	return fullPlatformProcessName(p)
+}
+
 type platformProcess struct {
 	pid, ppid, pgid int
 	identity        uint64
@@ -32,8 +41,47 @@ var sendUnixGroupSignal = func(pgid int, sig syscall.Signal) error {
 	return syscall.Kill(-pgid, sig)
 }
 
+// sendUnixProcessSignal is the checked per-process signal boundary.
+var sendUnixProcessSignal = syscall.Kill
+
 func unixProcessGone(err error) bool {
 	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
+}
+
+// terminateUnregisteredCommand runs before Wait, while the unreaped child pins
+// its PID. Its private process group can therefore be signaled without relying
+// on the metadata lookup that may have caused registration to fail.
+func terminateUnregisteredCommand(cmd *exec.Cmd, opts *Options) error {
+	if !hasExecutableExclusions(opts.NoKillExes) {
+		err := sendUnixGroupSignal(cmd.Process.Pid, syscall.SIGKILL)
+		if err == nil || unixProcessGone(err) {
+			return nil
+		}
+		if !errors.Is(err, syscall.EPERM) {
+			return fmt.Errorf("kill unregistered process group %d: %w", cmd.Process.Pid, err)
+		}
+		// Group permission failures can still allow individual members to be
+		// signaled. Reuse the identified-process fallback below.
+	}
+	p, err := lookupPlatformProcess(cmd.Process.Pid)
+	if err != nil {
+		return fmt.Errorf("identify unregistered process %d: %w", cmd.Process.Pid, err)
+	}
+	if p.identity == 0 || p.pgid != cmd.Process.Pid {
+		return fmt.Errorf("invalid identity or group for unregistered process %d", cmd.Process.Pid)
+	}
+	root := ProcessRecord{pid: p.pid, pgid: p.pgid, identity: p.identity, name: p.name}
+	controller := &unixController{opts: opts}
+	if hasExecutableExclusions(opts.NoKillExes) {
+		// Disabling forced termination must not suppress an allowed graceful
+		// stop; otherwise Wait can hang on a process that would accept SIGINT.
+		return controller.stop(root, opts.CleanupTime, opts.forceStopChannel())
+	}
+	known := map[int]platformProcess{p.pid: p}
+	if err := refreshUnixTree(root, known); err != nil {
+		return err
+	}
+	return controller.signalForce(root, known)
 }
 
 type unixController struct {
@@ -140,9 +188,9 @@ func (c *unixController) stop(root ProcessRecord, cleanup time.Duration, force <
 	if err := refreshUnixTree(root, known); err != nil {
 		return err
 	}
-	if err := c.signalGraceful(root, known); err != nil {
-		return err
-	}
+	// One denied member must not prevent escalation for other identified
+	// processes. Retain the error while completing the allowed cleanup.
+	gracefulErr := c.signalGraceful(root, known)
 	if cleanup > 0 {
 		timer, ticker := time.NewTimer(cleanup), time.NewTicker(20*time.Millisecond)
 		defer timer.Stop()
@@ -150,10 +198,11 @@ func (c *unixController) stop(root ProcessRecord, cleanup time.Duration, force <
 		for {
 			alive, err := refreshAndCheckUnixTree(root, known)
 			if err != nil {
-				return err
+				gracefulErr = errors.Join(gracefulErr, err)
+				goto FORCE
 			}
 			if !alive {
-				return nil
+				return gracefulErr
 			}
 			select {
 			case <-force:
@@ -166,9 +215,9 @@ func (c *unixController) stop(root ProcessRecord, cleanup time.Duration, force <
 	}
 FORCE:
 	if err := refreshUnixTree(root, known); err != nil {
-		return err
+		return errors.Join(gracefulErr, err)
 	}
-	return c.signalForce(root, known)
+	return errors.Join(gracefulErr, c.signalForce(root, known))
 }
 
 func validateRootProcess(root ProcessRecord) (platformProcess, error) {
@@ -239,24 +288,25 @@ func (c *unixController) signalGraceful(root ProcessRecord, known map[int]platfo
 	if allowed, _ := canSendSignal("", c.opts.NoStopExes); !allowed {
 		return nil
 	}
-	if len(c.opts.NoStopExes) == 0 {
+	var signalErr error // Collect member failures while visiting every safe target.
+	if !hasExecutableExclusions(c.opts.NoStopExes) {
 		alive, err := identifiedUnixGroup(root, known)
 		if err != nil {
 			return err
 		}
 		if alive {
 			if err := signalKnownUnixGroup(root, known, syscall.SIGINT); err != nil {
-				return err
+				signalErr = errors.Join(signalErr, err)
 			}
 		}
 		for _, p := range known {
 			if p.pgid != root.pgid {
 				if err := signalUnixProcess(p, syscall.SIGINT); err != nil {
-					return err
+					signalErr = errors.Join(signalErr, err)
 				}
 			}
 		}
-		return nil
+		return signalErr
 	}
 	for _, p := range orderedUnixProcesses(known) {
 		name, err := fullPlatformProcessName(p)
@@ -264,40 +314,42 @@ func (c *unixController) signalGraceful(root ProcessRecord, known map[int]platfo
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("identify executable for pid %d: %w", p.pid, err)
+			signalErr = errors.Join(signalErr, fmt.Errorf("identify executable for pid %d: %w", p.pid, err))
+			continue
 		}
 		ok, _ := canSendSignal(name, c.opts.NoStopExes)
 		if ok {
 			if err := signalUnixProcess(p, syscall.SIGINT); err != nil {
-				return err
+				signalErr = errors.Join(signalErr, err)
 			}
 		}
 	}
-	return nil
+	return signalErr
 }
 
 func (c *unixController) signalForce(root ProcessRecord, known map[int]platformProcess) error {
 	if allowed, _ := canSendSignal("", c.opts.NoKillExes); !allowed {
 		return nil
 	}
-	if len(c.opts.NoKillExes) == 0 {
+	var signalErr error // Collect member failures while visiting every safe target.
+	if !hasExecutableExclusions(c.opts.NoKillExes) {
 		alive, err := identifiedUnixGroup(root, known)
 		if err != nil {
 			return err
 		}
 		if alive {
 			if err := signalKnownUnixGroup(root, known, syscall.SIGKILL); err != nil {
-				return err
+				signalErr = errors.Join(signalErr, err)
 			}
 		}
 		for _, p := range known {
 			if p.pgid != root.pgid {
 				if err := signalUnixProcess(p, syscall.SIGKILL); err != nil {
-					return err
+					signalErr = errors.Join(signalErr, err)
 				}
 			}
 		}
-		return nil
+		return signalErr
 	}
 	for _, p := range orderedUnixProcesses(known) {
 		name, err := fullPlatformProcessName(p)
@@ -305,16 +357,17 @@ func (c *unixController) signalForce(root ProcessRecord, known map[int]platformP
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("identify executable for pid %d: %w", p.pid, err)
+			signalErr = errors.Join(signalErr, fmt.Errorf("identify executable for pid %d: %w", p.pid, err))
+			continue
 		}
 		ok, _ := canSendSignal(name, c.opts.NoKillExes)
 		if ok {
 			if err := signalUnixProcess(p, syscall.SIGKILL); err != nil {
-				return err
+				signalErr = errors.Join(signalErr, err)
 			}
 		}
 	}
-	return nil
+	return signalErr
 }
 
 func identifiedUnixGroup(root ProcessRecord, known map[int]platformProcess) (bool, error) {
@@ -385,7 +438,7 @@ func signalUnixProcess(expected platformProcess, sig syscall.Signal) error {
 	if current.zombie {
 		return nil
 	}
-	if err := syscall.Kill(expected.pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := sendUnixProcessSignal(expected.pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return err
 	}
 	return nil

@@ -21,13 +21,50 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/shenwei356/util/stringutil"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
+
+// completeCSVValue preserves pflag's slice API while rejecting ignored CSV rows.
+type completeCSVValue struct {
+	pflag.Value
+	pflag.SliceValue
+}
+
+func (value *completeCSVValue) Set(text string) error {
+	if text != "" {
+		reader := csv.NewReader(strings.NewReader(text))
+		if _, err := reader.Read(); err != nil {
+			return err
+		}
+		if _, err := reader.Read(); err != io.EOF {
+			return fmt.Errorf("expected a single CSV record; quote values containing newlines")
+		}
+	}
+	return value.Value.Set(text)
+}
+
+// protectMultiValueFlags applies the same CSV contract to all string-slice flags.
+func protectMultiValueFlags(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Value.Type() == "stringSlice" {
+			flag.Value = &completeCSVValue{Value: flag.Value, SliceValue: flag.Value.(pflag.SliceValue)}
+			// pflag recognizes [] as a zero default only for its concrete slice
+			// type. Use the equivalent empty help default for the wrapper.
+			if flag.DefValue == "[]" {
+				flag.DefValue = ""
+			}
+		}
+	})
+}
 
 func checkError(err error) {
 	if err != nil {

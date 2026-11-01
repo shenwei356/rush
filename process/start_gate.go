@@ -136,8 +136,7 @@ func (g *startGate) start(c *Command, cmd *exec.Cmd, controller processControlle
 	}
 	if err := controller.Started(cmd); err != nil {
 		g.finished(c)
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+		// Command.Run owns rollback and Wait for both launch paths.
 		return fmt.Errorf("register cmd #%d: %w", c.ID, err)
 	}
 	return nil
@@ -171,8 +170,8 @@ func (g *startGate) monitorMemory() {
 		}
 		available, _, err := availableMemory()
 		if err != nil {
-			Log.Error(fmt.Errorf("monitor available memory: %w", err))
 			g.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+			Log.Error(fmt.Errorf("monitor available memory: %w", err))
 			return
 		}
 		if available >= g.minMemory/2+g.minMemory%2 {

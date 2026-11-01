@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"sync"
 	"syscall"
@@ -24,6 +25,9 @@ func getCommand(_ context.Context, qcmd string) *exec.Cmd {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup}
 	return cmd
 }
+
+// Windows cannot replace the process image through a Unix-style exec.
+func ownedCommandName(cmd *exec.Cmd) (string, error) { return filepath.Base(cmd.Path), nil }
 
 type windowsProcess struct {
 	pid, ppid uint32
@@ -64,6 +68,28 @@ func openIdentifiedProcess(pid uint32, access uint32) (windows.Handle, uint64, e
 		return 0, 0, err
 	}
 	return h, id, nil
+}
+
+// terminateUnregisteredCommand identifies the still-owned process independently
+// of the failed registration and applies the usual per-executable exclusions.
+func terminateUnregisteredCommand(cmd *exec.Cmd, opts *Options) error {
+	pid := uint32(cmd.Process.Pid)
+	h, identity, err := openIdentifiedProcess(pid, windows.SYNCHRONIZE|windows.PROCESS_TERMINATE)
+	if err != nil {
+		return fmt.Errorf("identify unregistered process %d: %w", pid, err)
+	}
+	defer windows.CloseHandle(h)
+	if identity == 0 {
+		return fmt.Errorf("process %d has no creation identity", pid)
+	}
+	root := windowsRecord{pid: pid, handle: h, identity: identity, name: "cmd.exe"}
+	controller := &windowsController{opts: opts}
+	if hasExecutableExclusions(opts.NoKillExes) {
+		// Keep graceful stopping available for processes excluded from force.
+		return controller.stop(root, opts.CleanupTime, opts.forceStopChannel())
+	}
+	known := map[uint32]windowsProcess{pid: {pid: pid, identity: identity, name: root.name}}
+	return controller.forceTree(root, known)
 }
 func (c *windowsController) Started(cmd *exec.Cmd) error {
 	pid := uint32(cmd.Process.Pid)
@@ -236,7 +262,9 @@ func (c *windowsController) stop(root windowsRecord, cleanup time.Duration, forc
 	known := map[uint32]windowsProcess{root.pid: {pid: root.pid, identity: root.identity, name: root.name}}
 	alive, err := refreshAndCheckWindowsTree(root, known)
 	if err != nil {
-		return err
+		// A failed member inspection must not abandon other identified members.
+		// forceTree repeats the root identity check before sending any signals.
+		return errors.Join(err, c.forceTree(root, known))
 	}
 	// An ordinary failed command may already have no surviving descendants.
 	// Do not send a console event to its now-empty process group.
@@ -264,7 +292,8 @@ func (c *windowsController) stop(root windowsRecord, cleanup time.Duration, forc
 		for {
 			alive, err := refreshAndCheckWindowsTree(root, known)
 			if err != nil {
-				return err
+				gracefulErr = errors.Join(gracefulErr, err)
+				goto FORCE
 			}
 			if !alive {
 				return gracefulErr
@@ -279,19 +308,26 @@ func (c *windowsController) stop(root windowsRecord, cleanup time.Duration, forc
 		}
 	}
 FORCE:
-	forceErr := c.forceTree(root, known)
-	if forceErr != nil {
-		return forceErr
-	}
-	return gracefulErr
+	return errors.Join(gracefulErr, c.forceTree(root, known))
 }
+
+// openWindowsCleanupProcess is the handle-acquisition boundary during cleanup.
+var openWindowsCleanupProcess = openIdentifiedProcess
+
 func (c *windowsController) forceTree(root windowsRecord, known map[uint32]windowsProcess) error {
 	deadline := time.Now().Add(time.Second)
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
+	// Remember failed members while continuing to discover and stop safe targets.
+	failed := make(map[uint32]bool)
+	var cleanupErrors []error
+	recordFailure := func(pid uint32, err error) {
+		failed[pid] = true
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("stop process %d: %w", pid, err))
+	}
 	for {
 		if err := refreshWindowsTree(root, known); err != nil {
-			return err
+			return errors.Join(append(cleanupErrors, err)...)
 		}
 		ps := make([]windowsProcess, 0, len(known))
 		for _, p := range known {
@@ -300,37 +336,56 @@ func (c *windowsController) forceTree(root windowsRecord, known map[uint32]windo
 		sort.Slice(ps, func(i, j int) bool { return ps[i].pid > ps[j].pid })
 		eligibleAlive := false
 		for _, p := range ps {
+			if failed[p.pid] {
+				continue
+			}
 			kill, _ := canSendSignal(p.name, c.opts.NoKillExes)
 			if !kill {
 				continue
 			}
 			alive, err := windowsProcessAlive(p)
 			if err != nil {
-				return err
+				recordFailure(p.pid, err)
+				continue
 			}
 			if !alive {
 				continue
 			}
-			eligibleAlive = true
-			h, id, err := openIdentifiedProcess(p.pid, windows.PROCESS_TERMINATE|windows.SYNCHRONIZE)
+			h, id, err := openWindowsCleanupProcess(p.pid, windows.PROCESS_TERMINATE|windows.SYNCHRONIZE)
+			if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+				continue // The process exited between inspection and opening its handle.
+			}
 			if err != nil {
-				return err
+				recordFailure(p.pid, err)
+				continue
 			}
 			if id != p.identity {
 				windows.CloseHandle(h)
-				return fmt.Errorf("process identity changed for pid %d", p.pid)
+				recordFailure(p.pid, fmt.Errorf("process identity changed for pid %d", p.pid))
+				continue
 			}
 			err = windows.TerminateProcess(h, 1)
-			windows.CloseHandle(h)
-			if err != nil && !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
-				return err
+			if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+				// Windows also returns access denied for an already-exited process.
+				status, waitErr := windows.WaitForSingleObject(h, 0)
+				if waitErr == nil && status == windows.WAIT_OBJECT_0 {
+					windows.CloseHandle(h)
+					continue
+				}
+				err = errors.Join(err, waitErr)
 			}
+			windows.CloseHandle(h)
+			if err != nil {
+				recordFailure(p.pid, err)
+				continue
+			}
+			eligibleAlive = true
 		}
 		if !eligibleAlive {
-			return nil
+			return errors.Join(cleanupErrors...)
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("forced cleanup exceeded one second for pid %d", root.pid)
+			return errors.Join(append(cleanupErrors, fmt.Errorf("forced cleanup exceeded one second for pid %d", root.pid))...)
 		}
 		<-ticker.C
 	}

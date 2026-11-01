@@ -63,6 +63,7 @@ Major:
     - Input data
         - `{}`, full data. (Same in GNU parallel)
         - `{n}`, `n`th field in delimiter-delimited data. (Same in GNU parallel)
+          Missing fields leave the entire expression unchanged, including chained operations.
     - Job related
         - `{#}`, job ID. With `--continue`, its saved form is stable when input order
         changes. (Same replacement string as GNU parallel.)
@@ -73,7 +74,7 @@ Major:
         - `{%}`, basename. (`{/}` in GNU parallel)
         - `{.}`, remove the last file extension. (Same in GNU parallel)
         - `{:}`, remove all file extensions (***Not directly supported in GNU parallel***)
-        - `{^suffix}`, remove `suffix` (***Not directly supported in GNU parallel***)
+        - `{^suffix}`, remove `suffix` only when it occurs at the end (***Not directly supported in GNU parallel***)
         - `{@regexp}`, capture submatch using regular expression (***Not directly supported in GNU parallel***).
            There's a limitation here: curly brackets can't be used in the regular expression.
     - Combinations
@@ -199,7 +200,7 @@ And then:
 ```text
 rush -- a cross-platform command-line tool for executing jobs in parallel
 
-Version: 0.11.0
+Version: 0.11.1
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -218,7 +219,8 @@ Input:
 
 Output:
   - Outputs of all commands are written to STDOUT by default,
-    you can also use -o/--out-file to specify a output file.
+    you can also use -o/--out-file to specify an output file.
+    Output and successful-command files must differ from each other and from inputs.
   - Outputs of all commands are random, you can use the flag -k/--keep-order
     to keep output in order of input.
   - Outputs of all commands are buffered, you can use the flag -I/--immediate-output
@@ -239,8 +241,14 @@ Replacement strings in commands:
               threads for each command. This value is dynamically adjusted according
               to the number of jobs (-j/--jobs).
 
+  {#} and {?} must stand alone inside their braces. Missing fields, undefined
+  variables, and unsupported expressions stay unchanged.
+
   With --continue, {#} and {?} are kept stable in the successful-command file,
   so changing input order or job count does not rerun otherwise unchanged jobs.
+  The record file must be regular; concurrent writers and ambiguous or damaged
+  records are rejected. Review completed jobs before rebuilding rejected records.
+  --dry-run never creates or updates the record file.
 
   Escaping curly brackets "{}":
     {{}}        {}
@@ -266,14 +274,16 @@ Preset variable (macro):
      $ echo a/b/c.txt.gz | rush -v 'p={%:}' 'echo {p} {p}.csv'
      c c.csv
 
+  For multi-value flags (-i, -v, --no-stop-exes, --no-kill-exes), repeat the flag
+  or use CSV quoting, e.g., -v '"p=a,b"' for a value containing a comma.
+
 Resource limits:
-  - On Unix, rush reduces concurrency when needed to fit its open-file limit,
-    reserving descriptors for pipes, process handles, and buffered retry output.
-    A warning reports the reduced job count. If even one job cannot fit, rush
-    reports an error; raise ulimit -n or reduce --retries.
-  - Child programs' own file and thread limits still apply.
-  - A failed command's remaining child processes are stopped before retrying.
-    Shell commands that launch background work should wait for it before exiting.
+  - Concurrent jobs (Unix): rush reduces concurrency to fit its open-file limit
+    and reports a warning. If one job cannot fit, raise ulimit -n or reduce --retries.
+  - Commands opening many files or using many threads: child programs' own
+    file and thread limits still apply.
+  - Background work and retries: failed commands' children are stopped before
+    retrying. Shell commands that launch background work should wait for it.
 
 Usage:
   rush [flags] [command] 
@@ -358,7 +368,7 @@ Flags:
   -q, --escape                    escape special symbols like $ which you can customize by flag
                                   -Q/--escape-symbols
   -Q, --escape-symbols string     symbols to escape (default "$#&`")
-      --eta                       show ETA progress bar
+      --eta                       show ETA and processed job counts
   -d, --field-delimiter string    field delimiter in records, support regular expression (default "\\s+")
   -h, --help                      help for rush
   -I, --immediate-output          print output immediately and interleaved, to aid debugging
@@ -367,7 +377,8 @@ Flags:
   -k, --keep-order                keep output in order of input
       --load string               start jobs only while system load is below this value (number or
                                   percent of CPUs)
-      --memfree string            minimum available memory before starting jobs (bytes or K/M/G/T/P suffix)
+      --memfree string            minimum available memory before starting jobs (bytes or K/M/G/T/P
+                                  suffix; 0 disables)
       --no-kill-exes strings      exe names to exclude from kill signal, example: mspdbsrv.exe; or use
                                   all for all exes (default none)
       --no-stop-exes strings      exe names to exclude from stop signal, example: mspdbsrv.exe; or use
@@ -375,7 +386,8 @@ Flags:
   -n, --nrecords int              number of records sent to a command (default 1)
   -o, --out-file string           out file ("-" for stdout) (default "-")
       --pipe                      send each group of records to the command's standard input
-      --print-retry-output        print output from retry commands (default true)
+      --print-retry-output        print buffered retry output (final attempt is always printed) (default
+                                  true)
       --propagate-exit-status     propagate child exit status up to the exit status of rush (default true)
   -D, --record-delimiter string   record delimiter (default is "\n") (default "\n")
   -J, --records-join-sep string   record separator for joining multi-records (default is "\n") (default "\n")
@@ -388,16 +400,21 @@ Flags:
                                   "r" for right, "lr", "rl", "b" for both side)
       --verbose                   print verbose information
   -V, --version                   print version information and check for update
-
 ```
+
+`--eta` counts completed and failed jobs, plus successful jobs skipped by
+`--continue`. Empty input records and batches that expand to empty commands
+are excluded from the total. Cancelled jobs do not count as processed.
 
 `--delay` sets the minimum interval between process starts in seconds, for example
 `--delay 0.5`. `--load 100%` allows a new job only when the system's one-minute
 load average is below the number of CPUs; a number such as `--load 4` sets an
 absolute threshold. `--memfree 1G` waits until at least 1 GiB of physical memory
 is available. Uppercase size suffixes use powers of 1024, and lowercase suffixes
-use powers of 1000. These limits apply to starts and retries; `-j` still caps
-the number of concurrent jobs.
+use powers of 1000. Zero disables the memory limit; nonzero sizes below one
+byte are rejected. These limits apply to starts and retries; `-j` still caps
+the number of concurrent jobs. `--dry-run` validates the options without
+waiting for resources.
 
 On Unix, rush also limits concurrency to leave room for its pipes, process
 handles, and output temporary files. It counts existing open files where
@@ -415,7 +432,9 @@ the program's thread count to suit the available resources.
 If available memory falls below half the `--memfree` threshold, rush stops the
 youngest running job and places it back in the queue. Its buffered standard
 output is discarded; standard error already written may remain visible. This
-restart does not use one of its `-r/--retries` attempts.
+restart does not use one of its `-r/--retries` attempts. Output from earlier failed
+attempts still follows `--print-retry-output`, including when a queued restart is
+cancelled; buffered-output read and cleanup errors are reported.
 On Windows, the load average is estimated from the processor queue and may
 initially read as zero. Resource checks use system-wide values, so memory
 limits imposed on a container may differ from the reported available memory.
@@ -501,10 +520,7 @@ limits imposed on a container may differ from the reported available memory.
         15:37:10.744 [ERRO] wait cmd #3: timeout 3 sh -c "sleep 3; echo \"job 3: input 3\"": exit status 124
         15:37:10.744 [ERRO] wait cmd #5: timeout 3 sh -c "sleep 5; echo \"job 5: input 5\"": exit status 124
         
-        $ cat successful_cmds.rush 
-        timeout 3 sh -c "sleep 1; echo \"job {#}: input 1\""__CMD__
-        timeout 3 sh -c "sleep 2; echo \"job {#}: input 2\""__CMD__
-        
+        # Resume unfinished jobs using the saved records.
         $ seq 5 | rush 'timeout 3 sh -c "sleep {}; echo \"job {#}: input {}\""' -c
         15:37:19.186 [ERRO] wait cmd #2: timeout 3 sh -c "sleep 4; echo \"job 4: input 4\"": exit status 124
         15:37:19.186 [ERRO] wait cmd #1: timeout 3 sh -c "sleep 3; echo \"job 3: input 3\"": exit status 124
@@ -555,6 +571,8 @@ limits imposed on a container may differ from the reported available memory.
     preserved, while an unterminated final record remains unterminated. Empty
     records are ignored, as in normal mode. `-J` only affects record placeholders
     and does not change data sent to standard input.
+    `-T/--trim` trims each record's contents before piping, preserving batch
+    boundaries and record terminators, including records made empty by trimming.
 
     Retries receive the same batch again. With `--continue`, a batch is identified
     by both the expanded command and a digest of its standard input. Replacement
@@ -648,10 +666,14 @@ limits imposed on a container may differ from the reported available memory.
 
     - Linux: rush sends `SIGINT` to every marked child process, waits up to `--cleanup-time`, and then sends `SIGKILL` to any remaining processes using native system calls.
     - Windows: rush starts each command in a new process group and sends that group a directed `Ctrl+Break`, followed by forced tree cleanup. Windows cannot direct `Ctrl+C` to a child group; a user `Ctrl+C` still makes rush exit with status 130.
-    - Unix `Ctrl+C` exits with status 130 and `SIGTERM` exits with status 143. A command timeout exits with status 124.
+    - Unix `Ctrl+C` exits with status 130 and `SIGTERM` exits with status 143. Command timeouts use status 124.
+      When a command terminates from a Unix signal, its propagated exit status is
+      128 plus the signal number, e.g., 137 for `SIGKILL`.
     - Cleanup covers ordinary descendants that remain in the Unix process group or Windows parent/child tree. Processes that deliberately detach, daemonize, create a new console/session, or use Windows breakaway are outside this guarantee.
 
     Press `Ctrl-C` again to skip the remaining cleanup delay and immediately kill unfinished processes.
+    On Unix, this also aborts blocked pipe/socket output through stdout, stderr, or `-o`,
+    discarding undelivered output and restoring inherited output flags.
     Commands that have not started are discarded after the interrupt and are not executed.
 
         $ seq 1 20 | rush -j 4 'sleep 1; echo {}'
@@ -678,6 +700,21 @@ limits imposed on a container may differ from the reported available memory.
     please switch flag `-c/--continue` on and run again,
     so that `rush` can save successful commands and ignore them in **NEXT** run.
     Skipped commands are silent by default; use `--verbose` to print each one.
+    With `--dry-run`, rush reads existing successes without creating or updating
+    the record file. Only one run can write a regular record file at a time.
+
+    New records require rush v0.11.1 or later and preserve multiline commands
+    and literal placeholders. Jobs using `{#}` also track input batches and
+    repeated occurrences, so a completed job cannot hide an unfinished one.
+    Macro compositions are matched by their expanded results.
+
+    Damaged or ambiguous older records are rejected before execution and left
+    unchanged. Review completed jobs before rebuilding the file; automatic
+    conversion cannot recover missing distinctions. Unambiguous older records
+    remain readable, including commands with expanded numeric job IDs.
+
+    Expansion errors stop active jobs and preserve completed-job records.
+    An error before the first new command leaves existing output intact.
 
         $ seq 1 3 | rush 'sleep {}; echo {}' -t 3 -c
         1
@@ -685,9 +722,9 @@ limits imposed on a container may differ from the reported available memory.
         [ERRO] run cmd #3: sleep 3; echo 3: time out
 
         # successful commands:
-        $ cat successful_cmds.rush
-        sleep 1; echo 1__CMD__
-        sleep 2; echo 2__CMD__
+        $ cat -v successful_cmds.rush
+        ^@rush-command-v2:"sleep 1; echo 1"__CMD__
+        ^@rush-command-v2:"sleep 2; echo 2"__CMD__
 
         # run again
         $ seq 1 3 | rush 'sleep {}; echo {}' -t 3 -c
@@ -704,11 +741,9 @@ limits imposed on a container may differ from the reported available memory.
         [ERRO] run cmd #3: sleep 3; echo 3; \
         echo finish 3: time out
 
-        $ cat finished.rush
-        sleep 1; echo 1; \
-        echo finish 1__CMD__
-        sleep 2; echo 2; \
-        echo finish 2__CMD__
+        $ cat -v finished.rush
+        ^@rush-command-v2:"sleep 1; echo 1; \\\necho finish 1"__CMD__
+        ^@rush-command-v2:"sleep 2; echo 2; \\\necho finish 2"__CMD__
 
         # run again
         $ seq 1 3 | rush 'sleep {}; echo {}; \

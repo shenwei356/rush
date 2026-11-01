@@ -45,13 +45,14 @@ import (
 
 var writeSuccessfulCommandFile = func(w *bufio.Writer, value string) (int, error) { return w.WriteString(value) }
 var flushSuccessfulCommandFile = func(w *bufio.Writer) error { return w.Flush() }
+var closeRunFile = func(f *os.File) error { return f.Close() }
 var truncateSuccessfulCommandFile = func(f *os.File, size int64) error { return f.Truncate(size) }
 var seekSuccessfulCommandFile = func(f *os.File, offset int64, whence int) (int64, error) {
 	return f.Seek(offset, whence)
 }
 
 func appendSuccessfulCommand(w *bufio.Writer, command string) error {
-	if _, err := writeSuccessfulCommandFile(w, command+endMarkOfCMD); err != nil {
+	if _, err := writeSuccessfulCommandFile(w, encodeSuccessfulCommand(command)+endMarkOfCMD); err != nil {
 		return err
 	}
 	return flushSuccessfulCommandFile(w)
@@ -91,7 +92,8 @@ Input:
 
 Output:
   - Outputs of all commands are written to STDOUT by default,
-    you can also use -o/--out-file to specify a output file.
+    you can also use -o/--out-file to specify an output file.
+    Output and successful-command files must differ from each other and from inputs.
   - Outputs of all commands are random, you can use the flag -k/--keep-order
     to keep output in order of input.
   - Outputs of all commands are buffered, you can use the flag -I/--immediate-output
@@ -112,8 +114,14 @@ Replacement strings in commands:
               threads for each command. This value is dynamically adjusted according
               to the number of jobs (-j/--jobs).
 
+  {#} and {?} must stand alone inside their braces. Missing fields, undefined
+  variables, and unsupported expressions stay unchanged.
+
   With --continue, {#} and {?} are kept stable in the successful-command file,
   so changing input order or job count does not rerun otherwise unchanged jobs.
+  The record file must be regular; concurrent writers and ambiguous or damaged
+  records are rejected. Review completed jobs before rebuilding rejected records.
+  --dry-run never creates or updates the record file.
 
   Escaping curly brackets "{}":
     {{}}        {}
@@ -139,14 +147,16 @@ Preset variable (macro):
      $ echo a/b/c.txt.gz | rush -v 'p={%%:}' 'echo {p} {p}.csv'
      c c.csv
 
+  For multi-value flags (-i, -v, --no-stop-exes, --no-kill-exes), repeat the flag
+  or use CSV quoting, e.g., -v '"p=a,b"' for a value containing a comma.
+
 Resource limits:
-  - On Unix, rush reduces concurrency when needed to fit its open-file limit,
-    reserving descriptors for pipes, process handles, and buffered retry output.
-    A warning reports the reduced job count. If even one job cannot fit, rush
-    reports an error; raise ulimit -n or reduce --retries.
-  - Child programs' own file and thread limits still apply.
-  - A failed command's remaining child processes are stopped before retrying.
-    Shell commands that launch background work should wait for it before exiting.
+  - Concurrent jobs (Unix): rush reduces concurrency to fit its open-file limit
+    and reports a warning. If one job cannot fit, raise ulimit -n or reduce --retries.
+  - Commands opening many files or using many threads: child programs' own
+    file and thread limits still apply.
+  - Background work and retries: failed commands' children are stopped before
+    retrying. Shell commands that launch background work should wait for it.
 
 `, VERSION),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -187,6 +197,39 @@ Resource limits:
 
 		// -----------------------------------------------------------------
 
+		checkError(validateRunFiles(config))
+
+		// TmpOutputDataBuffer = config.BufferSize
+		if config.DryRun {
+			config.Verbose = false
+		}
+
+		var succCmds = make(map[string]struct{})
+		var hasOlderRecords bool
+		var bfhSuccCmds *bufio.Writer
+		var fhSuccCmds *os.File
+		var succCmdOriginalSize int64
+		if config.Continue {
+			// Lock before reading records or opening output: rollback must not
+			// erase another run's successes, and previews must not read torn writes.
+			recordFile, openErr := openContinueFile(config.SuccCmdFile, config.DryRun)
+			checkError(openErr)
+			if recordFile != nil {
+				defer recordFile.Close()
+				succCmds, hasOlderRecords = readSuccCmdsFrom(recordFile)
+				if config.DryRun {
+					checkError(recordFile.Close())
+				} else {
+					fhSuccCmds = recordFile
+					_, seekErr := fhSuccCmds.Seek(0, os.SEEK_END)
+					checkError(seekErr)
+					info, statErr := fhSuccCmds.Stat()
+					checkError(statErr)
+					succCmdOriginalSize = info.Size()
+					bfhSuccCmds = bufio.NewWriter(fhSuccCmds)
+				}
+			}
+		}
 		// out file handler
 		var outfh *os.File = nil
 		var errfh *os.File = nil
@@ -196,39 +239,48 @@ Resource limits:
 			errfh = os.Stderr
 		} else {
 			// use unbuffered file for writing, so we don't lose output on .Exit()
-			outfh, err = os.Create(config.OutFile)
+			// Open without truncation until paths, setup, and input reading succeed.
+			outfh, err = os.OpenFile(config.OutFile, os.O_WRONLY|os.O_CREATE, 0666)
 			checkError(err)
 			defer outfh.Close()
 			errfh = outfh
 		}
 
-		// TmpOutputDataBuffer = config.BufferSize
-		if config.DryRun {
-			config.Verbose = false
+		// New files may expose aliases through symlinked paths. Check again
+		// before truncating the output or appending any successful commands.
+		checkError(validateRunFiles(config))
+		// Queue interrupts before changing inherited output flags. The monitor
+		// below handles them once the run state and process options are ready.
+		signalChan := make(chan os.Signal, 2)
+		signal.Notify(signalChan, terminationSignals()...)
+		defer signal.Stop(signalChan)
+		originalOutput := outfh
+		outfh, restoreOutput, outputSetupErr := newInterruptibleOutput(outfh)
+		checkError(errors.Wrap(outputSetupErr, "prepare interruptible output"))
+		defer restoreOutput()
+		diagnostics, restoreDiagnostics, diagnosticsErr := prepareDiagnostics()
+		if diagnosticsErr != nil {
+			_ = restoreOutput()
+			checkError(errors.Wrap(diagnosticsErr, "prepare interruptible stderr"))
 		}
-
-		var succCmds = make(map[string]struct{})
-		var bfhSuccCmds *bufio.Writer
-		var fhSuccCmds *os.File
-		var succCmdOriginalSize int64
-		if config.Continue {
-			var existed bool
-			existed, err = exists(config.SuccCmdFile)
-			checkError(err)
-			if existed {
-				succCmds = readSuccCmds(config.SuccCmdFile)
-				fhSuccCmds, err = os.OpenFile(config.SuccCmdFile, os.O_APPEND|os.O_WRONLY, 0664)
-			} else {
-				fhSuccCmds, err = os.Create(config.SuccCmdFile)
+		defer restoreDiagnostics()
+		if errfh == os.Stderr {
+			errfh = diagnostics
+		}
+		if errfh == originalOutput {
+			errfh = outfh
+		}
+		// Input failures exit before normal shutdown; restore inherited output
+		// flags here too, while no command has started using the output yet.
+		checkInputError := func(err error) {
+			if err != nil {
+				// Log while deadlines still work: reporting a read failure can
+				// itself block on stderr and require a second interrupt.
+				log.Error(err)
+				_ = restoreDiagnostics()
+				_ = restoreOutput()
+				os.Exit(1)
 			}
-			checkError(err)
-			info, statErr := fhSuccCmds.Stat()
-			checkError(statErr)
-			succCmdOriginalSize = info.Size()
-
-			defer fhSuccCmds.Close()
-
-			bfhSuccCmds = bufio.NewWriter(fhSuccCmds)
 		}
 
 		opts := &process.Options{
@@ -237,16 +289,16 @@ Resource limits:
 			ETA:              config.ETA,
 			KeepOrder:        config.KeepOrder,
 			Retries:          config.Retries,
-			RetryInterval:    time.Duration(config.RetryInterval * float64(time.Second)),
+			RetryInterval:    config.RetryInterval,
 			OutFileHandle:    outfh,
 			ErrFileHandle:    errfh,
 			ImmediateOutput:  config.ImmediateOutput,
 			PrintRetryOutput: config.PrintRetryOutput,
-			Timeout:          time.Duration(config.Timeout) * time.Second,
+			Timeout:          config.Timeout,
 			StopOnErr:        config.StopOnErr,
 			NoStopExes:       config.NoStopExes,
 			NoKillExes:       config.NoKillExes,
-			CleanupTime:      time.Duration(config.CleanupTime) * time.Second,
+			CleanupTime:      config.CleanupTime,
 			StartDelay:       config.StartDelay,
 			MaxLoad:          config.MaxLoad,
 			MinFreeMemory:    config.MinFreeMemory,
@@ -283,26 +335,52 @@ Resource limits:
 		defer cancelRun()
 
 		chExitSignalMonitor := make(chan struct{})
-		signalChan := make(chan os.Signal, 2)
 		cleanupDone := make(chan int)
-		signal.Notify(signalChan, terminationSignals()...)
+		var forcedOutputStop atomic.Bool // Also guards final progress output.
+		// A full stderr pipe must not prevent the monitor receiving another
+		// interrupt. Drain notices separately while keeping escalation active.
+		signalMessages := make(chan string, 2)
+		signalLogsDone := make(chan struct{})
+		go func() {
+			defer close(signalLogsDone)
+			for message := range signalMessages {
+				log.Critical(message)
+			}
+		}()
 		go func() {
 			interrupted := false
+			stopMonitor := chExitSignalMonitor
+			var logsDone <-chan struct{}
+			notify := func(message string) {
+				if stopMonitor != nil {
+					select {
+					case signalMessages <- message:
+					default: // Repeated interrupts need no unbounded log queue.
+					}
+				}
+			}
 			for {
 				select {
 				case sig := <-signalChan:
 					if interrupted {
-						log.Criticalf("received another interrupt, killing unfinished commands...")
 						state.Force()
 						opts.ForceStop()
+						forcedOutputStop.Store(true)
+						// Release command output, diagnostics, and any logger
+						// holding the logging mutex while its pipe is full.
+						_ = outfh.SetWriteDeadline(time.Now())
+						_ = diagnostics.SetWriteDeadline(time.Now())
+						notify("received another interrupt, killing unfinished commands...")
 						continue
 					}
 					interrupted = true
-					status := terminationStatus(sig)
-					log.Criticalf("received an interrupt, stopping unfinished commands...")
-					state.Stop(runstate.Cause{Kind: runstate.Signal, Status: status})
-				case <-chExitSignalMonitor:
-					signal.Stop(signalChan)
+					state.Stop(runstate.Cause{Kind: runstate.Signal, Status: terminationStatus(sig)})
+					notify("received an interrupt, stopping unfinished commands...")
+				case <-stopMonitor:
+					close(signalMessages)
+					stopMonitor = nil
+					logsDone = signalLogsDone
+				case <-logsDone:
 					cleanupDone <- 1
 					return
 				}
@@ -323,18 +401,18 @@ Resource limits:
 		go func() {
 			for c := range chSuccessfulCmd {
 				nSuccCmds.Add(1)
-				if config.Continue {
+				if bfhSuccCmds != nil {
 					if succCmdWriteErr != nil {
 						continue
 					}
 					succCmdWriteErr = appendSuccessfulCommand(bfhSuccCmds, c)
 					if succCmdWriteErr != nil {
-						log.Error(errors.Wrap(succCmdWriteErr, "write successful-command file"))
 						state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+						log.Error(errors.Wrap(succCmdWriteErr, "write successful-command file"))
 					}
 				}
 			}
-			doneCheckSuccCmd <- 1
+			close(doneCheckSuccCmd)
 		}()
 
 		// generate commands
@@ -352,9 +430,14 @@ Resource limits:
 				infh = os.Stdin
 			} else {
 				infh, err = openInputFile(file)
-				checkError(err)
+				checkInputError(err)
 			}
-			scanner := bufio.NewScanner(newInputReader(infh, runCtx))
+			inputReader, restoreInput, readerErr := newInputReader(infh, runCtx)
+			if readerErr != nil && !isStdin(file) {
+				_ = infh.Close()
+			}
+			checkInputError(errors.Wrap(readerErr, "prepare input reader"))
+			scanner := bufio.NewScanner(inputReader)
 			inputCloserDone := make(chan struct{})
 			inputCloserExited := make(chan struct{})
 			go func(f *os.File) {
@@ -382,22 +465,54 @@ Resource limits:
 					record = record[:len(record)-len(config.RecordDelimiter)]
 					terminated = true
 				}
+				// Empty records are ignored by batching, so exclude them from
+				// both stored input and the initial progress total.
+				if record == "" {
+					continue
+				}
 				inputlines = append(inputlines, inputRecord{data: record, terminated: terminated})
 			}
 			close(inputCloserDone)
 			<-inputCloserExited
+			if restoreErr := restoreInput(); restoreErr != nil {
+				state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+				log.Error(errors.Wrap(restoreErr, "restore input flags"))
+			}
 			// All input is read before scheduling. Release each file now rather
 			// than retaining one descriptor per -i argument until rush exits.
 			if !isStdin(file) {
 				closeErr := infh.Close()
 				if closeErr != nil && runCtx.Err() == nil {
-					checkError(errors.Wrap(closeErr, "close input file"))
+					checkInputError(errors.Wrap(closeErr, "close input file"))
 				}
 			}
 			if scanErr := scanner.Err(); scanErr != nil && runCtx.Err() == nil {
 				state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
-				checkError(errors.Wrap(scanErr, "read input data"))
+				checkInputError(errors.Wrap(scanErr, "read input data"))
 			}
+		}
+
+		// Initialize output only after the first runnable command is expanded.
+		// The producer owns this state until it finishes; an empty successful
+		// run initializes output below after all goroutines have been joined.
+		outputReady := false
+		prepareOutput := func() error {
+			if outputReady {
+				return nil
+			}
+			if !isStdin(config.OutFile) {
+				info, err := outfh.Stat()
+				if err != nil {
+					return err
+				}
+				if info.Mode().IsRegular() {
+					if err := outfh.Truncate(0); err != nil {
+						return err
+					}
+				}
+			}
+			outputReady = true
+			return nil
 		}
 
 		if opts.ETA {
@@ -406,7 +521,7 @@ Resource limits:
 				jobcount++
 			}
 			opts.ETABar = pb.NewOptions(jobcount,
-				pb.OptionSetWriter(os.Stderr),
+				pb.OptionSetWriter(diagnostics),
 				pb.OptionSetDescription("processed jobs: "),
 				pb.OptionShowCount(),
 				pb.OptionShowIts(),
@@ -426,7 +541,22 @@ Resource limits:
 			defer close(chCmdStr)
 			defer close(donePreprocessFiles)
 
+			// Exiting from this producer would abandon active children. Cancel
+			// through the shared state so cleanup and output draining can finish.
+			stopForExpansionError := func(err error, operation string) {
+				state.Stop(runstate.Cause{Kind: runstate.InputError, Status: 1})
+				log.Error(errors.Wrap(err, operation))
+			}
+
 			sendCommand := func(cmdStr, recordCmd, stdin string) bool {
+				if runCtx.Err() != nil {
+					return false
+				}
+				if err := prepareOutput(); err != nil {
+					state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+					log.Error(errors.Wrap(err, "prepare command output"))
+					return false
+				}
 				select {
 				case chCmdStr <- process.Job{Cmd: cmdStr, RecordCmd: recordCmd, Stdin: stdin}:
 					anyCommands = true
@@ -435,121 +565,104 @@ Resource limits:
 					return false
 				}
 			}
-			wasSuccessful := func(recordCmd, cmdStr string) bool {
-				if _, ok := succCmds[recordCmd]; ok {
-					return true
+			// Older formats can lose input or job-value dependencies when macros
+			// construct another placeholder. Do not guess which jobs they identify.
+			if hasOlderRecords {
+				if err := validateLegacyContinueExpansion(runCtx, config, command0, inputlines); err != nil {
+					if runCtx.Err() == nil {
+						stopForExpansionError(err, "match successful commands")
+					}
+					return
 				}
-				if config.Pipe {
-					return false
+			}
+			wasSuccessful := func(recordCmd, cmdStr string) (bool, error) {
+				composed := isComposedContinueRecord(recordCmd)
+				if composed && hasOlderRecords {
+					return false, fmt.Errorf("ambiguous older successful-command records for composed job placeholders: review completed jobs and use a new record file")
+				}
+				if _, ok := succCmds[recordCmd]; ok {
+					return true, nil
+				}
+				if config.Pipe || composed {
+					return false, nil
 				}
 				// Older successful-command files contain the expanded {#} value.
 				_, ok := succCmds[cmdStr]
-				return ok
+				return ok, nil
 			}
 
 			n := config.NRecords
 			var id uint64 = 1
-
-			var records []string
-			records = make([]string, 0, n)
-			pipeRecords := make([]inputRecord, 0, n)
-			var cmdStr, recordCmd string
-			var stdin string
-			var runned bool
-			nJobs := (len(inputlines) + n - 1) / n
-			for _, input := range inputlines {
-				record := input.data
-				if record == "" {
+			jobOccurrences := make(continueJobOccurrences)
+			nJobs := len(inputlines) / n
+			if len(inputlines)%n != 0 {
+				nJobs++
+			}
+			// Input reading already excludes empty records. Use the same path
+			// for full batches and the final partial batch.
+			for start := 0; start < len(inputlines); {
+				if runCtx.Err() != nil {
+					return
+				}
+				end := start + min(n, len(inputlines)-start)
+				batch := inputlines[start:end]
+				start = end
+				records := make([]string, len(batch))
+				for i := range batch {
+					records[i] = batch[i].data
+				}
+				chunk := Chunk{ID: id, Data: records}
+				cmdStr, err := fillCommand(config, command0, chunk, nJobs-int(nSuccCmds.Load()))
+				if err != nil {
+					stopForExpansionError(err, "fill command")
+					return
+				}
+				if cmdStr == "" {
+					if opts.ETA {
+						opts.ETABar.AddMax(-1)
+					}
 					continue
 				}
-				records = append(records, record)
-				pipeRecords = append(pipeRecords, input)
-
-				if len(records) == n {
-					cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
-					checkError(errors.Wrap(err, "fill command"))
-					recordCmd = cmdStr
-					if config.Continue {
-						recordCmd, err = fillCommandForContinue(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
-						checkError(errors.Wrap(err, "fill command for continue"))
-					}
-					if config.Escape {
-						cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
-						recordCmd = stringutil.EscapeSymbols(recordCmd, config.EscapeSymbols)
-					}
-					stdin = ""
-					if config.Pipe {
-						stdin = buildPipeInput(pipeRecords, config.RecordDelimiter)
-						if config.Continue {
-							recordCmd = pipeContinueKey(recordCmd, stdin)
-						}
-					}
-					if len(cmdStr) > 0 {
-						if config.Continue {
-							if runned = wasSuccessful(recordCmd, cmdStr); runned {
-								if config.Verbose {
-									log.Infof("ignore cmd: %s", cmdStr)
-								}
-								if opts.ETA {
-									opts.ETABar.Add(1)
-									fmt.Fprintln(os.Stderr)
-								}
-								// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
-								// bfhSuccCmds.Flush()
-							} else {
-								if !sendCommand(cmdStr, recordCmd, stdin) {
-									return
-								}
-							}
-						} else {
-							if !sendCommand(cmdStr, recordCmd, stdin) {
-								return
-							}
-						}
-
-						id++
-					}
-					records = make([]string, 0, n)
-					pipeRecords = make([]inputRecord, 0, n)
-				}
-			}
-			if len(records) > 0 {
-				cmdStr, err = fillCommand(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
-				checkError(errors.Wrap(err, "fill command"))
-				recordCmd = cmdStr
+				id++
+				recordCmd := cmdStr
 				if config.Continue {
-					recordCmd, err = fillCommandForContinue(config, command0, Chunk{ID: id, Data: records}, nJobs-int(nSuccCmds.Load()))
-					checkError(errors.Wrap(err, "fill command for continue"))
+					recordCmd, err = fillCommandForContinue(config, command0, chunk, nJobs-int(nSuccCmds.Load()))
+					if err != nil {
+						stopForExpansionError(err, "fill command for continue")
+						return
+					}
 				}
 				if config.Escape {
 					cmdStr = stringutil.EscapeSymbols(cmdStr, config.EscapeSymbols)
-					recordCmd = stringutil.EscapeSymbols(recordCmd, config.EscapeSymbols)
+					recordCmd = escapeContinueCommand(recordCmd, config.EscapeSymbols)
 				}
-				stdin = ""
+				stdin := ""
 				if config.Pipe {
-					stdin = buildPipeInput(pipeRecords, config.RecordDelimiter)
+					stdin = buildPipeInput(batch, config.RecordDelimiter, config.Trim)
 					if config.Continue {
 						recordCmd = pipeContinueKey(recordCmd, stdin)
 					}
 				}
-				if len(cmdStr) > 0 {
-					if config.Continue {
-						if runned = wasSuccessful(recordCmd, cmdStr); runned {
-							if config.Verbose {
-								log.Infof("ignore cmd: %s", cmdStr)
-							}
-							// bfhSuccCmds.WriteString(cmdStr + endMarkOfCMD)
-							// bfhSuccCmds.Flush()
-						} else {
-							if !sendCommand(cmdStr, recordCmd, stdin) {
-								return
-							}
-						}
-					} else {
-						if !sendCommand(cmdStr, recordCmd, stdin) {
-							return
-						}
+				if config.Continue {
+					recordCmd = jobContinueKey(recordCmd, records, config.Trim, jobOccurrences)
+					runned, err := wasSuccessful(recordCmd, cmdStr)
+					if err != nil {
+						stopForExpansionError(err, "match successful command")
+						return
 					}
+					if runned {
+						if config.Verbose {
+							log.Infof("ignore cmd: %s", cmdStr)
+						}
+						if opts.ETA {
+							opts.ETABar.Add(1)
+							fmt.Fprintln(diagnostics)
+						}
+						continue
+					}
+				}
+				if !sendCommand(cmdStr, recordCmd, stdin) {
+					return
 				}
 			}
 		}()
@@ -565,8 +678,8 @@ Resource limits:
 				if outputWriteErr == nil {
 					_, outputWriteErr = outfh.WriteString(c)
 					if outputWriteErr != nil {
-						log.Error(errors.Wrap(outputWriteErr, "write command output"))
 						state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+						log.Error(errors.Wrap(outputWriteErr, "write command output"))
 					}
 				}
 				if t := time.Now(); t.After(last) {
@@ -582,6 +695,11 @@ Resource limits:
 		toolExitStatus := 0
 		go func() {
 			for childCode := range chExitStatus {
+				// Ignore disabled statuses before choosing the first failure so
+				// an earlier ordinary error cannot hide a later timeout.
+				if !config.PropExitStatus && childCode != 124 {
+					childCode = 0
+				}
 				setPointer := false
 				setCode := false
 				if pToolExitStatus == nil {
@@ -613,24 +731,77 @@ Resource limits:
 		if config.Continue {
 			<-doneCheckSuccCmd
 		}
-
-		close(chExitSignalMonitor)
-		<-cleanupDone
-		cause := state.Cause()
-		if opts.ETA {
-			// Only call Finish() if the run completed normally (not interrupted)
-			if cause.Status == 0 {
-				opts.ETABar.Finish()
+		if state.Cause().Status == 0 && !outputReady {
+			// Successful empty input or an entirely skipped run still produces
+			// an empty output file, matching an ordinary successful invocation.
+			if err := prepareOutput(); err != nil {
+				log.Error(errors.Wrap(err, "prepare command output"))
+				state.Record(runstate.Cause{Kind: runstate.Internal, Status: 1})
 			}
-			os.Stderr.WriteString("\n")
 		}
-		if config.Continue && (cause.Kind == runstate.Internal || outputWriteErr != nil || succCmdWriteErr != nil) {
+
+		// All writers have finished. Check Close before os.Exit bypasses
+		// deferred cleanup, and before deciding whether to retain success records.
+		if !isStdin(config.OutFile) {
+			if closeErr := closeRunFile(originalOutput); closeErr != nil {
+				log.Error(errors.Wrap(closeErr, "close command output"))
+				if outputWriteErr == nil {
+					outputWriteErr = closeErr
+				}
+				state.Record(runstate.Cause{Kind: runstate.Internal, Status: 1})
+			}
+		}
+		cause := state.Cause()
+		if fhSuccCmds != nil && (cause.Kind == runstate.Internal || outputWriteErr != nil || succCmdWriteErr != nil) {
 			// Discard buffered bytes before restoring the exact pre-run length.
 			if rollbackErr := rollbackSuccessfulCommands(bfhSuccCmds, fhSuccCmds, succCmdOriginalSize); rollbackErr != nil {
 				log.Error(errors.Wrap(rollbackErr, "rollback successful-command file"))
 				cause = runstate.Cause{Kind: runstate.Internal, Status: 1}
 			}
 		}
+		if fhSuccCmds != nil {
+			if closeErr := closeRunFile(fhSuccCmds); closeErr != nil {
+				log.Error(errors.Wrap(closeErr, "close successful-command file"))
+				if cause.Status == 0 {
+					cause = runstate.Cause{Kind: runstate.Internal, Status: 1}
+				}
+			}
+		}
+		if opts.ETA && !forcedOutputStop.Load() {
+			if opts.ETABar.GetMax() == 0 {
+				// The progress library cannot render a zero maximum after it
+				// changes, so replace any obsolete nonzero total explicitly.
+				opts.ETABar.Clear()
+				fmt.Fprintln(diagnostics, "processed jobs: (0/0)")
+			} else if cause.Status == 0 {
+				// Only fill the bar after a normal, uninterrupted completion.
+				opts.ETABar.Finish()
+			}
+			diagnostics.WriteString("\n")
+		}
+		// Keep escalation available through final diagnostics and progress
+		// output. The monitor also drains its notice writer before exiting.
+		close(chExitSignalMonitor)
+		<-cleanupDone
+		// Restore in reverse setup order: stdout and stderr can share one
+		// open-file description, even when they have different descriptor IDs.
+		diagnosticRestoreErr := restoreDiagnostics()
+		outputRestoreErr := restoreOutput()
+		signal.Stop(signalChan)
+		for len(signalChan) > 0 {
+			sig := <-signalChan
+			state.Record(runstate.Cause{Kind: runstate.Signal, Status: terminationStatus(sig)})
+		}
+		for _, restoreErr := range []error{diagnosticRestoreErr, outputRestoreErr} {
+			if restoreErr != nil {
+				log.Error(errors.Wrap(restoreErr, "restore output flags"))
+				state.Record(runstate.Cause{Kind: runstate.Internal, Status: 1})
+			}
+		}
+		if cause.Status == 0 {
+			cause = state.Cause()
+		}
+
 		if cause.Status != 0 {
 			os.Exit(cause.Status)
 		}
@@ -652,10 +823,25 @@ type inputRecord struct {
 	terminated bool
 }
 
-func buildPipeInput(records []inputRecord, delimiter string) string {
+// trimInputRecord applies the same whitespace rules to replacements and stdin.
+func trimInputRecord(record, mode string) string {
+	switch mode {
+	case "l":
+		return strings.TrimLeft(record, " \t\r\n")
+	case "r":
+		return strings.TrimRight(record, " \t\r\n")
+	case "lr", "rl", "b":
+		return strings.Trim(record, " \t\r\n")
+	default:
+		return record
+	}
+}
+
+func buildPipeInput(records []inputRecord, delimiter, trim string) string {
 	var buf strings.Builder
 	for i, record := range records {
-		buf.WriteString(record.data)
+		// Trim contents without changing grouping or original terminators.
+		buf.WriteString(trimInputRecord(record.data, trim))
 		if delimiter != "" && (record.terminated || i+1 < len(records)) {
 			buf.WriteString(delimiter)
 		}
@@ -665,7 +851,12 @@ func buildPipeInput(records []inputRecord, delimiter string) string {
 
 func pipeContinueKey(command, stdin string) string {
 	digest := sha256.Sum256([]byte(stdin))
-	return fmt.Sprintf("%s\n# rush --pipe stdin sha256: %x", command, digest)
+	// The prefix keeps stdin metadata distinct from an ordinary shell comment.
+	if strings.HasPrefix(command, continueComposedCommandPrefix) {
+		return fmt.Sprintf("%s%s\n# rush --pipe stdin sha256: %x", continueComposedPipePrefix, strings.TrimPrefix(command, continueComposedCommandPrefix), digest)
+	}
+	command = strings.TrimPrefix(command, continueCommandPrefix)
+	return fmt.Sprintf("%s%s\n# rush --pipe stdin sha256: %x", continuePipePrefix, command, digest)
 }
 
 // Chunk contains input data records sent to a command
@@ -677,6 +868,13 @@ type Chunk struct {
 // Execute adds all child commands to the root command sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
+	executeArgs(os.Args[1:])
+}
+
+// executeArgs protects diagnostic destinations before Cobra can report errors.
+func executeArgs(args []string) {
+	checkError(protectRunDiagnostics(diagnosticConfig(RootCmd.Flags(), args)))
+	RootCmd.SetArgs(args)
 	if err := RootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(-1)
@@ -686,12 +884,12 @@ func Execute() {
 func init() {
 	RootCmd.Flags().BoolP("verbose", "", false, "print verbose information")
 	RootCmd.Flags().BoolP("version", "V", false, `print version information and check for update`)
-	RootCmd.Flags().BoolP("eta", "", false, `show ETA progress bar`)
+	RootCmd.Flags().BoolP("eta", "", false, `show ETA and processed job counts`)
 
 	RootCmd.Flags().IntP("jobs", "j", runtime.NumCPU(), "run n jobs in parallel (default value depends on your device)")
 	RootCmd.Flags().Float64("delay", 0, "minimum seconds between starting jobs (supports fractions)")
 	RootCmd.Flags().String("load", "", "start jobs only while system load is below this value (number or percent of CPUs)")
-	RootCmd.Flags().String("memfree", "", "minimum available memory before starting jobs (bytes or K/M/G/T/P suffix)")
+	RootCmd.Flags().String("memfree", "", "minimum available memory before starting jobs (bytes or K/M/G/T/P suffix; 0 disables)")
 	RootCmd.Flags().StringP("out-file", "o", "-", `out file ("-" for stdout)`)
 
 	RootCmd.Flags().StringSliceP("infile", "i", []string{}, "input data file, multi-values supported")
@@ -705,7 +903,7 @@ func init() {
 	RootCmd.Flags().IntP("retries", "r", 0, "maximum retries (default 0)")
 	RootCmd.Flags().Float64P("retry-interval", "", 0, "retry interval (unit: second, supports fractions like 0.5) (default 0)")
 	RootCmd.Flags().BoolP("immediate-output", "I", false, "print output immediately and interleaved, to aid debugging")
-	RootCmd.Flags().BoolP("print-retry-output", "", true, "print output from retry commands")
+	RootCmd.Flags().BoolP("print-retry-output", "", true, "print buffered retry output (final attempt is always printed)")
 	RootCmd.Flags().IntP("timeout", "t", 0, "timeout of a command (unit: seconds, 0 for no timeout) (default 0)")
 
 	RootCmd.Flags().BoolP("keep-order", "k", false, "keep output in order of input")
@@ -732,6 +930,7 @@ func init() {
 	RootCmd.Flags().BoolP("escape", "q", false, `escape special symbols like $ which you can customize by flag -Q/--escape-symbols`)
 	RootCmd.Flags().StringP("escape-symbols", "Q", "$#&`", "symbols to escape")
 	// RootCmd.Flags().BoolP("escape-curly-brackets", "B", false, `escape curly brackets "{}" in the, e.g., "text{}" or "attr{href}"`)
+	protectMultiValueFlags(RootCmd)
 
 	RootCmd.Example = `  1. simple run, quoting is not necessary
       $ seq 1 10 | rush echo {}
@@ -846,16 +1045,16 @@ type Config struct {
 	Pipe                 bool
 
 	Retries          int
-	RetryInterval    float64
+	RetryInterval    time.Duration
 	ImmediateOutput  bool
 	PrintRetryOutput bool
-	Timeout          int
+	Timeout          time.Duration
 
 	KeepOrder      bool
 	StopOnErr      bool
 	NoStopExes     []string
 	NoKillExes     []string
-	CleanupTime    int
+	CleanupTime    time.Duration
 	PropExitStatus bool
 	DryRun         bool
 
@@ -873,8 +1072,8 @@ type Config struct {
 	EscapeCurlyBrackets bool
 }
 
-// var=value
-var reAssign = regexp.MustCompile(`\s*([a-zA-Z][A-Za-z0-9_]*)\s*=(.+)`)
+// Match the complete assignment and preserve newlines in a CSV-quoted value.
+var reAssign = regexp.MustCompile(`(?s)^\s*([a-zA-Z][A-Za-z0-9_]*)\s*=(.+)$`)
 
 func getConfigs(cmd *cobra.Command) Config {
 	trim := getFlagString(cmd, "trim")
@@ -892,14 +1091,19 @@ func getConfigs(cmd *cobra.Command) Config {
 	assignStrs := getFlagStringSlice(cmd, "assign")
 	assignMap := make(map[string]string)
 	for _, s := range assignStrs {
-		if reAssign.MatchString(s) {
-			found := reAssign.FindStringSubmatch(s)
+		if found := reAssign.FindStringSubmatch(s); found != nil {
 			assignMap[found[1]] = found[2]
 		} else {
 			checkError(fmt.Errorf(`illegal value for flag -v/--assign (format: "var=value", type "rush -h" for more details): %s`, s))
 		}
 	}
 	startDelay, err := parseStartDelay(getFlagNonNegativeFloat64(cmd, "delay"))
+	checkError(err)
+	retryInterval, err := parseSeconds("retry-interval", getFlagNonNegativeFloat64(cmd, "retry-interval"))
+	checkError(err)
+	timeout, err := parseWholeSeconds("timeout", getFlagNonNegativeInt(cmd, "timeout"))
+	checkError(err)
+	cleanupTime, err := parseWholeSeconds("cleanup-time", getFlagNonNegativeInt(cmd, "cleanup-time"))
 	checkError(err)
 	maxLoad, err := parseMaxLoad(getFlagString(cmd, "load"), runtime.NumCPU())
 	checkError(err)
@@ -926,16 +1130,16 @@ func getConfigs(cmd *cobra.Command) Config {
 		Pipe:                 getFlagBool(cmd, "pipe"),
 
 		Retries:          getFlagNonNegativeInt(cmd, "retries"),
-		RetryInterval:    getFlagNonNegativeFloat64(cmd, "retry-interval"),
+		RetryInterval:    retryInterval,
 		ImmediateOutput:  getFlagBool(cmd, "immediate-output"),
 		PrintRetryOutput: getFlagBool(cmd, "print-retry-output"),
-		Timeout:          getFlagNonNegativeInt(cmd, "timeout"),
+		Timeout:          timeout,
 
 		KeepOrder:      getFlagBool(cmd, "keep-order"),
 		StopOnErr:      getFlagBool(cmd, "stop-on-error"),
 		NoStopExes:     getFlagStringSlice(cmd, "no-stop-exes"),
 		NoKillExes:     getFlagStringSlice(cmd, "no-kill-exes"),
-		CleanupTime:    getFlagNonNegativeInt(cmd, "cleanup-time"),
+		CleanupTime:    cleanupTime,
 		PropExitStatus: getFlagBool(cmd, "propagate-exit-status"),
 		DryRun:         getFlagBool(cmd, "dry-run"),
 
@@ -953,5 +1157,3 @@ func getConfigs(cmd *cobra.Command) Config {
 		EscapeCurlyBrackets: true, // getFlagBool(cmd, "escape-curly-brackets"),
 	}
 }
-
-var reCurlyBrackets = regexp.MustCompile(`\{([^\{\}]*?)\}`)

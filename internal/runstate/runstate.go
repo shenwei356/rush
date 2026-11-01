@@ -15,6 +15,7 @@ const (
 	Timeout
 	StopOnError
 	Internal
+	InputError // Command expansion failed; completed jobs remain resumable.
 )
 
 // Cause is the immutable first terminal reason recorded for a run.

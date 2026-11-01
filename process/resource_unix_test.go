@@ -3,17 +3,22 @@
 package process
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/shenwei356/go-logging"
 	"github.com/shenwei356/rush/internal/runstate"
 )
 
@@ -184,6 +189,97 @@ func TestMemoryPressureRequeuesWithoutConsumingRetries(t *testing.T) {
 	}
 }
 
+func TestMemoryDiscardReadFailureReportsCleanupErrors(t *testing.T) {
+	for _, failure := range []string{"none", "close", "remove"} {
+		t.Run(failure, func(t *testing.T) {
+			withSpillSeams(t)
+			recorded := recordStarts(t, false)
+			oldMemory, oldPoll, oldBuffer, oldLog := availableMemory, resourcePollInterval, TmpOutputDataBuffer, Log
+			t.Cleanup(func() {
+				availableMemory, resourcePollInterval, TmpOutputDataBuffer, Log = oldMemory, oldPoll, oldBuffer, oldLog
+			})
+			var logs bytes.Buffer
+			Log = logging.MustGetLogger("memory-discard-errors")
+			Log.SetBackend(logging.AddModuleLevel(logging.NewLogBackend(&logs, "", 0)))
+			var free atomic.Uint64
+			free.Store(200)
+			availableMemory = func() (uint64, uint64, error) { return free.Load(), 400, nil }
+			resourcePollInterval = 10 * time.Millisecond
+			TmpOutputDataBuffer = 0
+			var spill *os.File
+			dir := t.TempDir()
+			createSpillFile = func() (*os.File, error) {
+				var err error
+				spill, err = os.CreateTemp(dir, "output-")
+				return spill, err
+			}
+			writeSpillFile = func(w *bufio.Writer, p []byte) (int, error) {
+				n, err := w.Write(p)
+				if n > 0 {
+					free.Store(40) // Stop only after the real command has produced output.
+				}
+				return n, err
+			}
+			readErr := errors.New("discarded output read failed")
+			cleanupErr := fmt.Errorf("discarded output %s failed", failure)
+			wrapSpillReader = func(r io.Reader) io.Reader {
+				return io.MultiReader(r, errorReader{err: readErr})
+			}
+			closeSpillFile = func(f *os.File) error {
+				err := f.Close()
+				if failure == "close" {
+					return errors.Join(err, cleanupErr)
+				}
+				return err
+			}
+			removeSpillFile = func(path string) error {
+				if failure == "remove" {
+					return cleanupErr
+				}
+				return os.Remove(path)
+			}
+			parent, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			state, ctx := runstate.New(parent)
+			defer state.Cancel()
+			input := make(chan string, 1)
+			input <- "printf partial; sleep 30"
+			close(input)
+			opts := &Options{Jobs: 1, Retries: 1, MinFreeMemory: 100, CleanupTime: 0, PropExitStatus: true, RecordSuccessfulCmd: true}
+			out, success, done, statuses := Run4OutputContext(opts, ctx, state.Cancel, input)
+			for text := range out {
+				t.Errorf("discarded output was emitted: %q", text)
+			}
+			<-done
+			if status, ok := <-statuses; !ok || status != 1 {
+				t.Errorf("status=%d, present=%t; want 1, true", status, ok)
+			}
+			if _, ok := <-statuses; ok {
+				t.Error("duplicate job status")
+			}
+			if record, ok := <-success; ok {
+				t.Errorf("failed job recorded as successful: %q", record)
+			}
+			if len(recorded.started) != 1 || state.Cause() != (runstate.Cause{Kind: runstate.Internal, Status: 1}) {
+				t.Errorf("starts=%d, cause=%+v", len(recorded.started), state.Cause())
+			}
+			if !strings.Contains(logs.String(), readErr.Error()) || (failure != "none" && !strings.Contains(logs.String(), cleanupErr.Error())) {
+				t.Errorf("missing read or cleanup error: %s", logs.String())
+			}
+			if spill == nil {
+				t.Fatal("command did not create a spill file")
+			}
+			if _, err := spill.Stat(); !errors.Is(err, os.ErrClosed) {
+				t.Errorf("spill descriptor was not closed: %v", err)
+			}
+			_, err := os.Stat(spill.Name())
+			if (failure == "remove" && err != nil) || (failure != "remove" && !errors.Is(err, os.ErrNotExist)) {
+				t.Errorf("unexpected spill removal result: %v", err)
+			}
+		})
+	}
+}
+
 func TestMemoryPressureWaitsForSelectedJobToStop(t *testing.T) {
 	oldMemory, oldPoll := availableMemory, resourcePollInterval
 	availableMemory = func() (uint64, uint64, error) { return 40, 400, nil }
@@ -260,6 +356,136 @@ func TestCancellationAfterMemoryRequeue(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("cancellation did not stop the queued retry")
+	}
+}
+
+func TestCancelledMemoryRequeueCompletesOutput(t *testing.T) {
+	for _, printRetryOutput := range []bool{false, true} {
+		for _, failure := range []string{"none", "read", "close"} {
+			t.Run(fmt.Sprintf("print-retries=%t/error=%s", printRetryOutput, failure), func(t *testing.T) {
+				withSpillSeams(t)
+				recorded := recordStarts(t, false)
+				oldMemory, oldPoll, oldBuffer, oldLog := availableMemory, resourcePollInterval, TmpOutputDataBuffer, Log
+				t.Cleanup(func() {
+					availableMemory, resourcePollInterval, TmpOutputDataBuffer, Log = oldMemory, oldPoll, oldBuffer, oldLog
+				})
+				var logs bytes.Buffer
+				Log = logging.MustGetLogger("cancelled-memory-requeue")
+				Log.SetBackend(logging.AddModuleLevel(logging.NewLogBackend(&logs, "", 0)))
+				var free atomic.Uint64
+				free.Store(200)
+				availableMemory = func() (uint64, uint64, error) { return free.Load(), 400, nil }
+				resourcePollInterval = 10 * time.Millisecond
+				TmpOutputDataBuffer = 0 // Exercise retained spill files from earlier attempts.
+				state, ctx := runstate.New(context.Background())
+				defer state.Cancel()
+				var spillMu sync.Mutex
+				spills := make(map[string]int)
+				spillDir := t.TempDir()
+				createSpillFile = func() (*os.File, error) {
+					file, err := os.CreateTemp(spillDir, "output-")
+					if err == nil {
+						spillMu.Lock()
+						spills[file.Name()] = len(spills) + 1
+						spillMu.Unlock()
+					}
+					return file, err
+				}
+				sentinel := fmt.Errorf("retained attempt %s failed", failure)
+				wrapSpillReader = func(reader io.Reader) io.Reader {
+					spillMu.Lock()
+					attempt := spills[reader.(*os.File).Name()]
+					spillMu.Unlock()
+					if attempt == 1 && failure == "read" {
+						return io.MultiReader(reader, errorReader{err: sentinel})
+					}
+					return reader
+				}
+				closeSpillFile = func(file *os.File) error {
+					spillMu.Lock()
+					attempt := spills[file.Name()]
+					spillMu.Unlock()
+					err := file.Close()
+					if attempt == 2 {
+						// Cancel after the memory-stopped attempt is drained, just
+						// before its logical job is returned to the retry queue.
+						state.Stop(runstate.Cause{Kind: runstate.Signal, Status: 130})
+					}
+					if attempt == 1 && failure == "close" {
+						return errors.Join(err, sentinel)
+					}
+					return err
+				}
+				first, second := t.TempDir()+"/first", t.TempDir()+"/second"
+				input := make(chan string, 1)
+				input <- fmt.Sprintf("if [ -e '%s' ]; then printf partial; touch '%s'; sleep 30; else touch '%s'; printf first; exit 7; fi", first, second, first)
+				close(input)
+				opts := &Options{Jobs: 1, Retries: 1, PrintRetryOutput: printRetryOutput, MinFreeMemory: 100, CleanupTime: 0, PropExitStatus: true, RecordSuccessfulCmd: true}
+				out, success, done, statuses := Run4OutputContext(opts, ctx, state.Cancel, input)
+				t.Cleanup(func() {
+					state.Cancel()
+					select {
+					case <-done:
+					case <-time.After(5 * time.Second):
+						t.Error("cancelled run did not finish")
+					}
+				})
+				output := make(chan string, 1)
+				go func() {
+					var text strings.Builder
+					for part := range out {
+						text.WriteString(part)
+					}
+					output <- text.String()
+				}()
+				deadline := time.Now().Add(3 * time.Second)
+				for {
+					if _, err := os.Stat(second); err == nil {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("second attempt did not start")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				free.Store(40)
+				select {
+				case <-done:
+				case <-time.After(3 * time.Second):
+					t.Fatal("cancelled memory retry did not finish")
+				}
+				want := ""
+				if printRetryOutput {
+					want = "first"
+				}
+				if got := <-output; got != want {
+					t.Errorf("output=%q; want %q", got, want)
+				}
+				if status, ok := <-statuses; !ok || status != 1 {
+					t.Errorf("cancelled job status=%d, present=%t; want 1, true", status, ok)
+				}
+				if _, ok := <-statuses; ok {
+					t.Error("duplicate job status")
+				}
+				if record, ok := <-success; ok {
+					t.Errorf("cancelled job recorded as successful: %q", record)
+				}
+				if strings.Contains(logs.String(), sentinel.Error()) != (failure != "none") {
+					t.Errorf("output error reporting: %s", logs.String())
+				}
+				if cause := state.Cause(); cause != (runstate.Cause{Kind: runstate.Signal, Status: 130}) {
+					t.Errorf("cancellation cause changed: %+v", cause)
+				}
+				if len(recorded.started) != 2 {
+					t.Errorf("started %d attempts; want 2", len(recorded.started))
+				}
+				for name := range spills {
+					if _, err := os.Stat(name); !errors.Is(err, os.ErrNotExist) {
+						t.Errorf("spill file remains: %s: %v", name, err)
+					}
+				}
+			})
+		}
 	}
 }
 

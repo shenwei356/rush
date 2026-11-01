@@ -9,11 +9,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	pb "github.com/schollz/progressbar/v3"
@@ -22,6 +22,9 @@ import (
 )
 
 var Log *logging.Logger
+
+// Verbose is the legacy default for standalone Commands. Scheduled runs use
+// their own Options.Verbose and never change this package-level default.
 var Verbose bool
 var TmpOutputDataBuffer = 1 << 20
 var OutputChunkSize = 16 << 10
@@ -64,9 +67,10 @@ type Command struct {
 	finishSendOutput bool
 	outputDone       <-chan error
 	outputErr        error
-	Err              error
+	Err              error // Read after the run completes; output failures may update it.
 	Duration         time.Duration
 	dryrun           bool
+	cancelled        bool // Cancellation result fixed before publishing to output consumers.
 	exitStatus       int
 	Executed         chan int
 	controller       processController
@@ -97,6 +101,18 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 		outputDone <- err
 		close(outputDone)
 	}
+	// Every failure before execution must complete the same notification paths.
+	fail := func(err error) (chan string, error) {
+		close(ch)
+		completeOutput(c.outputErr)
+		close(c.Executed)
+		c.exitStatus = 1
+		c.Err = err
+		return ch, err
+	}
+	if isClosed(c.Cancel) {
+		return fail(ErrCancelled)
+	}
 	if c.dryrun {
 		ch <- c.Cmd + "\n"
 		close(ch)
@@ -107,19 +123,34 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	}
 	started := time.Now()
 	defer func() { c.Duration = time.Since(started) }()
-	if Verbose {
+	// A standalone command may use the legacy default; a command owned by
+	// a scheduler must use that run's options without shared mutable state.
+	verbose := opts.Verbose || (c.controller == nil && Verbose)
+	if verbose {
 		Log.Infof("start cmd #%d: %s", c.ID, c.Cmd)
-		defer Log.Infof("finish cmd #%d: %s", c.ID, c.Cmd)
 	}
+	defer func() {
+		// Publish fatal failures before any completion/error log can block.
+		// Memory stops are retryable; cancellation already has its own cause.
+		if opts.state != nil {
+			if opts.StopOnErr && c.Err != nil && !errors.Is(c.Err, ErrCancelled) && !errors.Is(c.Err, ErrMemoryPressure) && !isOutputFailure(c.Err) {
+				opts.state.Stop(runstate.Cause{Kind: runstate.StopOnError, Status: max(c.exitStatus, 1)})
+			}
+			if c.outputErr != nil {
+				opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+			}
+		}
+		if verbose {
+			Log.Infof("finish cmd #%d: %s", c.ID, c.Cmd)
+		}
+	}()
 	controller := c.controller
 	owned := false
 	if controller == nil {
 		var err error
 		controller, err = makeProcessController(opts)
 		if err != nil {
-			close(ch)
-			completeOutput(nil)
-			return ch, err
+			return fail(err)
 		}
 		owned = true
 		defer controller.Close()
@@ -132,18 +163,33 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	if c.stdin != "" {
 		command.Stdin = strings.NewReader(c.stdin)
 	}
+	// Copier failures must stop a live command, not wait for it to exit before
+	// reporting the error. Keep a local notification for standalone Command.Run.
+	writeFailures := make(chan error, 1)
+	writeFailed := func(err error) {
+		select {
+		case writeFailures <- err:
+		default:
+		}
+		if opts.state != nil {
+			opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+		}
+	}
 	spill := newSpillWriter(TmpOutputDataBuffer)
+	spill.onError = writeFailed
 	var stdout, stderr *lockedWriter
 	if opts.ImmediateOutput {
-		stdout = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.OutFileHandle}
-		stderr = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.ErrFileHandle}
+		stdout = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.OutFileHandle, onError: writeFailed}
+		stderr = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.ErrFileHandle, onError: writeFailed}
 		command.Stdout, command.Stderr = stdout, stderr
 	} else {
-		stderr = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.ErrFileHandle}
+		stderr = &lockedWriter{mu: &opts.ImmediateLock, dst: opts.ErrFileHandle, onError: writeFailed}
 		command.Stdout, command.Stderr = spill, stderr
 	}
 	var startErr error
-	if opts.gate != nil {
+	if isClosed(c.Cancel) {
+		startErr = ErrCancelled
+	} else if opts.gate != nil {
 		if opts.MinFreeMemory > 0 {
 			c.memoryStop = make(chan struct{})
 		}
@@ -152,23 +198,41 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 		startErr = command.Start()
 		if startErr == nil {
 			startErr = controller.Started(command)
-			if startErr != nil {
-				_ = command.Process.Kill()
-				_ = command.Wait()
-			}
 		}
 	}
 	if startErr != nil {
+		if command.Process != nil {
+			cleanupErr := terminateUnregisteredCommand(command, opts)
+			// Retain the directly owned process as a fallback if tree inspection
+			// fails, or the command moved out of the group created for it.
+			if cleanupErr != nil || !hasExecutableExclusions(opts.NoKillExes) {
+				allowed, nameErr := canKillOwnedCommand(command, opts.NoKillExes)
+				cleanupErr = errors.Join(cleanupErr, nameErr)
+				if allowed {
+					killErr := command.Process.Kill()
+					if !errors.Is(killErr, os.ErrProcessDone) {
+						cleanupErr = errors.Join(cleanupErr, killErr)
+					}
+				}
+			}
+			waitErr := command.Wait()
+			var exitErr *exec.ExitError
+			if waitErr != nil && !errors.As(waitErr, &exitErr) {
+				cleanupErr = errors.Join(cleanupErr, waitErr)
+			}
+			controller.Finished(command)
+			if cleanupErr != nil {
+				startErr = errors.Join(startErr, fmt.Errorf("clean up failed start: %w", cleanupErr))
+				if opts.state != nil {
+					opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+				}
+			}
+		}
 		// Registration can fail after Start has already begun copying output.
-		// Both launch paths wait for that copier before returning the error.
+		// Wait has now joined the copier for either launch path.
 		c.tmpfh, c.tmpfile = spill.file, spill.name
 		c.outputErr = combineErrors(spill.err, firstWriterError(stdout, stderr), c.Cleanup())
-		close(ch)
-		completeOutput(c.outputErr)
-		close(c.Executed)
-		c.exitStatus = 1
-		c.Err = combineErrors(fmt.Errorf("start cmd #%d: %w", c.ID, startErr), c.outputErr)
-		return ch, c.Err
+		return fail(combineErrors(fmt.Errorf("start cmd #%d: %w", c.ID, startErr), c.outputErr))
 	}
 	defer controller.Finished(command)
 	if opts.gate != nil {
@@ -180,8 +244,8 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 		if err := controller.KillCommand(command); err != nil {
 			// The child handle is still ours until Wait completes. Stop it even
 			// when process-tree inspection or signaling fails.
-			var killErr error
-			if allowed, _ := canSendSignal(filepath.Base(command.Path), opts.NoKillExes); allowed {
+			allowed, killErr := canKillOwnedCommand(command, opts.NoKillExes)
+			if allowed {
 				killErr = command.Process.Kill()
 				if errors.Is(killErr, os.ErrProcessDone) {
 					killErr = nil
@@ -204,6 +268,9 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 	var waitErr, terminal error
 	select {
 	case waitErr = <-waited:
+	case err := <-writeFailures:
+		terminal = stopCommand(outputFailure{err})
+		waitErr = <-waited
 	case <-c.Cancel:
 		terminal = stopCommand(ErrCancelled)
 		waitErr = <-waited
@@ -226,7 +293,7 @@ func (c *Command) Run(opts *Options, tryNumber int) (chan string, error) {
 			waitErr = errors.Join(waitErr, cleanupErr)
 		}
 	}
-	c.exitStatus = command.ProcessState.ExitCode()
+	c.exitStatus = commandExitStatus(command.ProcessState)
 	if errors.Is(terminal, ErrTimeout) {
 		c.exitStatus = 124
 	}
@@ -321,49 +388,70 @@ func combineErrors(errs ...error) error {
 
 type outputFailure struct{ error }
 
+// Unwrap preserves the underlying I/O error for Command.Run callers.
+func (e outputFailure) Unwrap() error { return e.error }
+
 func isOutputFailure(err error) bool {
 	var failure outputFailure
 	return errors.As(err, &failure)
 }
 
 func (c *Command) Cleanup() error {
-	var first error
+	var closeErr, removeErr error
 	if c.tmpfh != nil {
-		if err := closeSpillFile(c.tmpfh); err != nil {
-			first = err
-		}
+		closeErr = closeSpillFile(c.tmpfh)
 		c.tmpfh = nil
 	}
 	if c.tmpfile != "" {
-		if err := removeSpillFile(c.tmpfile); err != nil && !errors.Is(err, os.ErrNotExist) && first == nil {
-			first = err
+		removeErr = removeSpillFile(c.tmpfile)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
 		}
 		c.tmpfile = ""
 	}
-	return first
+	// Both failures matter: a close error must not hide a leftover file.
+	return combineErrors(closeErr, removeErr)
 }
+
+// commandExitStatus preserves normal exit codes and represents Unix signals
+// using shell status conventions instead of ProcessState.ExitCode's -1.
+func commandExitStatus(state *os.ProcessState) int {
+	if state != nil {
+		if status, ok := state.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return 128 + int(status.Signal())
+		}
+	}
+	return state.ExitCode()
+}
+
 func (c *Command) getExitStatus(err error) int {
 	if err == nil {
 		return 0
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
-		return ee.ExitCode()
+		return commandExitStatus(ee.ProcessState)
 	}
 	return 1
 }
 
 type spillWriter struct {
-	limit int
-	mem   bytes.Buffer
-	file  *os.File
-	buf   *bufio.Writer
-	name  string
-	err   error
+	limit   int
+	mem     bytes.Buffer
+	file    *os.File
+	buf     *bufio.Writer
+	name    string
+	err     error
+	onError func(error) // Notify the running command when output cannot be stored.
 }
 
 func newSpillWriter(limit int) *spillWriter { return &spillWriter{limit: limit} }
 func (w *spillWriter) Write(p []byte) (int, error) {
+	defer func() {
+		if w.err != nil && w.onError != nil {
+			w.onError(w.err)
+		}
+	}()
 	if w.err != nil {
 		return 0, w.err
 	}
@@ -431,10 +519,11 @@ func writeAll(dst io.Writer, p []byte) error {
 }
 
 type lockedWriter struct {
-	mu    *sync.Mutex
-	dst   io.Writer
-	errMu sync.Mutex
-	err   error
+	mu      *sync.Mutex
+	dst     io.Writer
+	errMu   sync.Mutex
+	err     error
+	onError func(error) // Notify only after publishing the error and releasing locks.
 }
 
 func (w *lockedWriter) Write(p []byte) (int, error) {
@@ -453,6 +542,9 @@ func (w *lockedWriter) Write(p []byte) (int, error) {
 			w.err = err
 		}
 		w.errMu.Unlock()
+		if w.onError != nil {
+			w.onError(err)
+		}
 	}
 	return n, err
 }
@@ -549,8 +641,39 @@ const (
 	SEND_KILL_SIGNAL
 )
 
+// canKillOwnedCommand checks the current executable before fallback termination.
+// A Unix shell may have exec'd a different program under the same PID. If its
+// name cannot be read, the fallback must not bypass executable exclusions.
+func canKillOwnedCommand(command *exec.Cmd, excluded []string) (bool, error) {
+	if !hasExecutableExclusions(excluded) {
+		return true, nil
+	}
+	if allowed, _ := canSendSignal("", excluded); !allowed {
+		return false, nil
+	}
+	name, err := ownedCommandName(command)
+	if err != nil {
+		return false, fmt.Errorf("identify owned executable for pid %d: %w", command.Process.Pid, err)
+	}
+	return canSendSignal(name, excluded)
+}
+
+// hasExecutableExclusions ignores empty CSV entries when choosing a cleanup path.
+func hasExecutableExclusions(excluded []string) bool {
+	for _, name := range excluded {
+		if name != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func canSendSignal(name string, excluded []string) (bool, error) {
 	for _, x := range excluded {
+		// Empty CSV entries must not match the empty-name probe for "all".
+		if x == "" {
+			continue
+		}
 		if x == "all" || strings.EqualFold(name, x) {
 			return false, nil
 		}
@@ -615,7 +738,7 @@ type Options struct {
 	MinFreeMemory       uint64
 	PropExitStatus      bool
 	RecordSuccessfulCmd bool
-	Verbose             bool
+	Verbose             bool // Verbose enables start/finish logging for this run.
 	stopOnce            sync.Once
 	stopOnErrorOnce     sync.Once
 	forceStopInit       sync.Once
@@ -689,22 +812,22 @@ func combineCommandOutputs(parts []outputPart) (chan string, <-chan error) {
 	out := make(chan string, 1)
 	done := make(chan error, 1)
 	go func() {
-		var first error
+		var outputErrors []error
 		for _, part := range parts {
 			for value := range part.ch {
 				if part.emit {
 					out <- value
 				}
 			}
-			if err := <-part.done; err != nil && first == nil {
-				first = err
+			if err := <-part.done; err != nil {
+				outputErrors = append(outputErrors, err)
 			}
-			if err := part.command.Cleanup(); err != nil && first == nil {
-				first = err
+			if err := part.command.Cleanup(); err != nil {
+				outputErrors = append(outputErrors, err)
 			}
 		}
 		close(out)
-		done <- first
+		done <- combineErrors(outputErrors...)
 		close(done)
 	}()
 	return out, done
@@ -721,6 +844,8 @@ func Run(opts *Options, cancel chan struct{}, input chan string) (chan *Command,
 	return cmds, success, cancelAfterDone(done, stop), statuses
 }
 
+// Run4OutputContext forwards run cancellation to stop so callers can stop their
+// input producers. Successful completion leaves the caller's context active.
 func Run4OutputContext(opts *Options, ctx context.Context, stop context.CancelFunc, input chan string) (chan string, chan string, chan int, chan int) {
 	return run4OutputContext(opts, ctx, stop, input)
 }
@@ -733,7 +858,7 @@ func Run4OutputContextJobs(opts *Options, ctx context.Context, stop context.Canc
 
 func run4OutputContext[T commandInput](opts *Options, ctx context.Context, stop context.CancelFunc, input chan T) (chan string, chan string, chan int, chan int) {
 	commands, success, commandDone, statuses := runContext(opts, ctx, stop, input)
-	// The command channel already uses the effective file-descriptor budget.
+	// Reuse the scheduler's bounded channel capacity.
 	out := make(chan string, cap(commands))
 	done := make(chan int, 1)
 	go func() {
@@ -749,7 +874,7 @@ func run4OutputContext[T commandInput](opts *Options, ctx context.Context, stop 
 			}
 			if opts.ETA {
 				// Only increment progress bar for commands that were not cancelled
-				if !errors.Is(c.Err, ErrCancelled) {
+				if !c.cancelled {
 					_ = opts.ETABar.Add(1)
 				}
 			}
@@ -789,11 +914,31 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 	if opts.ErrFileHandle == nil {
 		opts.ErrFileHandle = os.Stderr
 	}
-	Verbose = opts.Verbose
-	state, ok := runstate.FromContext(parent)
+	state, sharedState := runstate.FromContext(parent)
 	ctx := parent
-	if !ok {
+	if !sharedState {
 		state, ctx = runstate.New(parent)
+	}
+	var detachCancel func() bool
+	var cancelForwarded chan struct{}
+	if stop != nil {
+		cancelForwarded = make(chan struct{})
+		// Forward cancellation independently of command output and diagnostics,
+		// which may block while the caller's producer needs to be released.
+		detachCancel = context.AfterFunc(ctx, func() {
+			stop()
+			close(cancelForwarded)
+		})
+	}
+	finishContext := func() {
+		// Detach before releasing an owned context: normal completion must not
+		// cancel the caller. Join any callback already started by a real stop.
+		if detachCancel != nil && !detachCancel() {
+			<-cancelForwarded
+		}
+		if !sharedState {
+			state.Cancel()
+		}
 	}
 	opts.state = state
 	jobs, limitErr := fileDescriptorJobLimit(opts)
@@ -807,35 +952,42 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 	}
 	opts.controller = controller
 	opts.gate = nil
-	if opts.StartDelay > 0 || opts.MaxLoad > 0 || opts.MinFreeMemory > 0 {
+	// Previews validate options but must not start execution-resource monitors.
+	if !opts.DryRun && (opts.StartDelay > 0 || opts.MaxLoad > 0 || opts.MinFreeMemory > 0) {
 		opts.gate = newStartGate(ctx, opts, state)
 	}
-	commands := make(chan *Command, jobs)
-	success := make(chan string, jobs)
+	if controllerErr != nil {
+		// Make setup failure visible before returning channels to the caller.
+		state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+	}
+	// Queue capacity need not equal concurrency. Bound eager allocations even
+	// when there is no file-descriptor cap (dry runs and Windows).
+	bufferSize := min(jobs, 1024)
+	commands := make(chan *Command, bufferSize)
+	success := make(chan string, bufferSize)
 	done := make(chan int, 1)
 	var statuses chan int
 	if opts.PropExitStatus {
-		statuses = make(chan int, jobs)
+		statuses = make(chan int, bufferSize)
 	}
-	results := make(chan runResult, jobs)
+	results := make(chan runResult, bufferSize)
 	type outputCompletion struct {
 		sequence uint64
 		err      error
 	}
 	type supervisedResult struct {
-		result                runResult
-		outputComplete        bool
-		outputFailureReported bool
+		result              runResult
+		outputComplete      bool
+		reportedOutputError error // Last diagnostic, before any later cleanup failures.
 	}
-	outputCompletions := make(chan outputCompletion, jobs)
+	outputCompletions := make(chan outputCompletion, bufferSize)
 	go func() {
-		defer func() { done <- 1; close(done) }()
+		defer func() { finishContext(); done <- 1; close(done) }()
 		if opts.gate != nil {
 			defer opts.gate.close()
 		}
 		if controllerErr != nil {
 			Log.Error(controllerErr)
-			state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
 			if controller != nil {
 				_ = controller.Close()
 			}
@@ -863,6 +1015,11 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 			if err == nil {
 				return
 			}
+			// Completion may add cleanup errors or errors from earlier retries.
+			// Preserve the initial failure unless the new error already includes it.
+			if previous := result.result.outputErr; previous != nil && !errors.Is(err, previous) {
+				err = combineErrors(previous, err)
+			}
 			result.result.outputErr = err
 			result.result.success = false
 			if result.result.status == 0 {
@@ -874,10 +1031,12 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 					result.result.command.Err = outputFailure{err}
 				}
 			}
-			if !result.outputFailureReported {
+			state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
+			// Report additional cleanup diagnostics even after an early failure,
+			// without printing an unchanged error again at output completion.
+			if result.reportedOutputError == nil || result.reportedOutputError.Error() != err.Error() {
 				Log.Error(err)
-				state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
-				result.outputFailureReported = true
+				result.reportedOutputError = err
 			}
 		}
 		finalizeReady := func() {
@@ -889,7 +1048,7 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 				if statuses != nil {
 					statuses <- result.result.status
 				}
-				if result.result.success && opts.RecordSuccessfulCmd {
+				if result.result.success && opts.RecordSuccessfulCmd && !opts.DryRun {
 					recordCmd := result.result.command.recordCmd
 					if recordCmd == "" {
 						recordCmd = result.result.command.Cmd
@@ -919,12 +1078,10 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 			}
 			if ctx.Err() != nil && len(retryQueue) > 0 {
 				for _, task := range retryQueue {
-					for _, part := range task.parts {
-						for range part.ch {
-						}
-						<-part.done
-						_ = part.command.Cleanup()
-					}
+					// The closed context prevents Command.Run from launching a
+					// process. Complete the job normally so retained output,
+					// cleanup errors, and its final status are still delivered.
+					startTask(task)
 				}
 				retryQueue = nil
 			}
@@ -1037,6 +1194,12 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 func executeWithRetries(ctx context.Context, opts *Options, controller processController, task *runTask) runResult {
 	var command *Command
 	finish := func(success bool, status int, outputErr error) runResult {
+		command.cancelled = errors.Is(command.Err, ErrCancelled)
+		// Stop-on-error or cancellation can end a job before its retry budget
+		// is exhausted. Its final attempt's output must still be delivered.
+		if len(task.parts) > 0 {
+			task.parts[len(task.parts)-1].emit = true
+		}
 		command.Ch, command.outputDone = combineCommandOutputs(task.parts)
 		return runResult{command: command, success: success, status: status, outputErr: outputErr}
 	}
@@ -1047,21 +1210,16 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 		command.controller = controller
 		command.dryrun = opts.DryRun
 		ch, err := command.Run(opts, attempt+1)
-		if errors.Is(err, ErrMemoryPressure) && command.outputErr != nil {
-			opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
-		}
 		if errors.Is(err, ErrMemoryPressure) && ctx.Err() == nil && command.outputErr == nil {
 			// A memory stop is independent of the user's retry budget. Discard
 			// its partial output before putting the same logical job back.
 			for range ch {
 			}
-			if outputErr := <-command.outputDone; outputErr != nil {
+			// Always clean up the discarded attempt, including after a read
+			// failure, and retain both errors before publishing the result.
+			if outputErr := combineErrors(<-command.outputDone, command.Cleanup()); outputErr != nil {
 				opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
 				return finish(false, 1, outputErr)
-			}
-			if cleanupErr := command.Cleanup(); cleanupErr != nil {
-				opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
-				return finish(false, 1, cleanupErr)
 			}
 			task.attempt = attempt
 			return runResult{retry: task}
@@ -1076,7 +1234,6 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 				status = 1
 			}
 			if opts.StopOnErr && err != nil && !isOutputFailure(err) && !errors.Is(err, ErrCancelled) {
-				opts.state.Stop(runstate.Cause{Kind: runstate.StopOnError, Status: status})
 				Log.Error("stop on first error")
 			}
 			return finish(false, status, command.outputErr)
@@ -1096,7 +1253,6 @@ func executeWithRetries(ctx context.Context, opts *Options, controller processCo
 			if status == 0 {
 				status = 1
 			}
-			opts.state.Stop(runstate.Cause{Kind: runstate.StopOnError, Status: status})
 			Log.Error("stop on first error")
 			return finish(false, status, nil)
 		}

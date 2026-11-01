@@ -4,7 +4,10 @@ package process
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -12,11 +15,160 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// TestWindowsCleanupHelperProcess keeps an owned process alive for cleanup tests.
+func TestWindowsCleanupHelperProcess(t *testing.T) {
+	if os.Getenv("RUSH_WINDOWS_CLEANUP_HELPER") != "1" {
+		return
+	}
+	time.Sleep(30 * time.Second)
+	os.Exit(0)
+}
+
+func TestWindowsForceCleanupContinuesAfterMemberFailure(t *testing.T) {
+	for _, mode := range []string{"denied", "exited", "identity"} {
+		t.Run(mode, func(t *testing.T) {
+			// Both targets are owned helper processes. Visit the failing one first
+			// so an early return cannot accidentally pass the cleanup assertion.
+			type target struct {
+				cmd    *exec.Cmd
+				record windowsRecord
+			}
+			var targets []target
+			for i := 0; i < 2; i++ {
+				cmd := exec.Command(os.Args[0], "-test.run=^TestWindowsCleanupHelperProcess$")
+				cmd.Env = append(os.Environ(), "RUSH_WINDOWS_CLEANUP_HELPER=1")
+				if err := cmd.Start(); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+				})
+				pid := uint32(cmd.Process.Pid)
+				h, identity, err := openIdentifiedProcess(pid, windows.SYNCHRONIZE)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { windows.CloseHandle(h) })
+				targets = append(targets, target{cmd, windowsRecord{pid: pid, handle: h, identity: identity, name: "cleanup-helper"}})
+			}
+			if targets[0].record.pid > targets[1].record.pid {
+				targets[0], targets[1] = targets[1], targets[0]
+			}
+			root, failing := targets[0].record, targets[1]
+			known := make(map[uint32]windowsProcess)
+			for _, target := range targets {
+				r := target.record
+				known[r.pid] = windowsProcess{pid: r.pid, identity: r.identity, name: r.name}
+			}
+			originalOpen := openWindowsCleanupProcess
+			t.Cleanup(func() { openWindowsCleanupProcess = originalOpen })
+			attempts := 0
+			openWindowsCleanupProcess = func(pid uint32, access uint32) (windows.Handle, uint64, error) {
+				if pid != failing.record.pid {
+					return originalOpen(pid, access)
+				}
+				attempts++
+				switch mode {
+				case "denied":
+					return 0, 0, windows.ERROR_ACCESS_DENIED
+				case "exited":
+					if err := failing.cmd.Process.Kill(); err != nil {
+						t.Fatal(err)
+					}
+					status, err := windows.WaitForSingleObject(failing.record.handle, 2000)
+					if err != nil || status != windows.WAIT_OBJECT_0 {
+						t.Fatalf("helper did not exit: status=%d, error=%v", status, err)
+					}
+					return 0, 0, windows.ERROR_INVALID_PARAMETER
+				default:
+					h, identity, err := originalOpen(pid, access)
+					return h, identity + 1, err
+				}
+			}
+			controller := &windowsController{opts: &Options{}}
+			err := controller.forceTree(root, known)
+			switch mode {
+			case "denied":
+				if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+					t.Errorf("permission error lost: %v", err)
+				}
+			case "exited":
+				if err != nil {
+					t.Errorf("already-exited member caused cleanup failure: %v", err)
+				}
+			case "identity":
+				if err == nil || !strings.Contains(err.Error(), "identity changed") {
+					t.Errorf("identity error lost: %v", err)
+				}
+			}
+			if attempts != 1 {
+				t.Errorf("failing member visited %d times; want 1", attempts)
+			}
+			for _, target := range targets {
+				alive, err := windowsProcessAlive(known[target.record.pid])
+				wantAlive := target.record.pid == failing.record.pid && mode != "exited"
+				if err != nil || alive != wantAlive {
+					t.Errorf("pid %d: alive=%t, error=%v; want alive=%t", target.record.pid, alive, err, wantAlive)
+				}
+			}
+		})
+	}
+}
+
 func TestWindowsExitedCommandCleanupPreservesRetries(t *testing.T) {
 	opts := &Options{Jobs: 1, Retries: 1, PropExitStatus: true, CleanupTime: 0}
 	got := observeRun(t, opts, "exit /b 7")
 	if len(got.commands) != 1 || len(got.statuses) != 1 || got.statuses[0] != 7 || got.cause.Status != 0 {
 		t.Fatalf("commands=%d, statuses=%v, cause=%v; want child exit status 7", len(got.commands), got.statuses, got.cause)
+	}
+}
+
+func TestWindowsUnregisteredCleanupStopsDescendants(t *testing.T) {
+	for _, exclude := range []bool{false, true} {
+		cmd := getCommand(context.Background(), "ping -n 30 127.0.0.1 >NUL")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		func() {
+			defer func() {
+				_ = terminateUnregisteredCommand(cmd, &Options{})
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+			}()
+			deadline := time.Now().Add(3 * time.Second)
+			var child windowsProcess
+			for child.pid == 0 {
+				processes, err := snapshotWindowsProcesses()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, p := range processes {
+					if p.ppid == uint32(cmd.Process.Pid) {
+						child = p
+						break
+					}
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("child did not start")
+				}
+				if child.pid == 0 {
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			opts := &Options{}
+			if exclude {
+				opts.NoKillExes = []string{child.name}
+				opts.NoStopExes = []string{child.name}
+			}
+			if err := terminateUnregisteredCommand(cmd, opts); err != nil {
+				t.Fatal(err)
+			}
+			alive, err := windowsProcessAlive(child)
+			if err != nil || alive != exclude {
+				t.Fatalf("excluded=%t: child alive=%t, err=%v", exclude, alive, err)
+			}
+		}()
 	}
 }
 

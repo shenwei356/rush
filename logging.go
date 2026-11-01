@@ -31,14 +31,35 @@ import (
 
 var log *logging.Logger
 
+// logBackend also serves process logs through the shared logging backend.
+var logBackend *logging.LogBackend
+
 func init() {
 	logFormat := logging.MustStringFormatter(`%{time:15:04:05.000} %{color}[%{level:.4s}]%{color:reset} %{message}`)
 	var stderr io.Writer = os.Stderr
 	if runtime.GOOS == "windows" {
 		stderr = colorable.NewColorableStderr()
 	}
-	backend := logging.NewLogBackend(stderr, "", 0)
-	backendFormatter := logging.NewBackendFormatter(backend, logFormat)
+	logBackend = logging.NewLogBackend(stderr, "", 0)
+	backendFormatter := logging.NewBackendFormatter(logBackend, logFormat)
 	logging.SetBackend(backendFormatter)
 	log = logging.MustGetLogger("rush")
+}
+
+// prepareDiagnostics routes logs and progress through the interruptible stderr
+// handle. Call cleanup after all writers have stopped and before os.Exit.
+func prepareDiagnostics() (*os.File, func() error, error) {
+	output, cleanup, err := newInterruptibleOutput(os.Stderr)
+	if err != nil {
+		return nil, nil, err
+	}
+	original := logBackend.Logger.Writer()
+	// Preserve the Windows color adapter when no new handle is needed.
+	if output != os.Stderr {
+		logBackend.Logger.SetOutput(output)
+	}
+	return output, func() error {
+		logBackend.Logger.SetOutput(original)
+		return cleanup()
+	}, nil
 }

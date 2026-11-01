@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -14,6 +15,160 @@ import (
 	"testing"
 	"time"
 )
+
+func TestInterruptStopsSkippedCommandGeneration(t *testing.T) {
+	for _, resumed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("resumed=%t", resumed), func(t *testing.T) {
+			args := []string{"--eta", "-j", "1", "--cleanup-time", "0"}
+			input := " \n"
+			if resumed {
+				journal := t.TempDir() + "/success"
+				if err := os.WriteFile(journal, []byte("echo old"+endMarkOfCMD), 0600); err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, "-c", "-C", journal)
+				input = "old\n"
+			} else {
+				args = append(args, "-T", "b")
+			}
+			cmd := rushTestCommand(t, strings.Repeat(input, 100000), append(args, "echo {}")...)
+			// Hold stderr in a pipe until the initial progress display arrives.
+			// Backpressure prevents all skipped batches finishing before SIGINT.
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reader.Close()
+			defer writer.Close()
+			cmd.Stderr = writer
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if cmd.ProcessState == nil {
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+				}
+			})
+			_ = writer.Close()
+			if err := reader.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			initial := make([]byte, 1024)
+			n, err := reader.Read(initial)
+			if err != nil || !bytes.Contains(initial[:n], []byte("processed jobs:")) {
+				t.Fatalf("missing initial progress: %q, %v", initial[:n], err)
+			}
+			if err := cmd.Process.Signal(os.Interrupt); err != nil {
+				t.Fatal(err)
+			}
+			if err := reader.SetReadDeadline(time.Time{}); err != nil {
+				t.Fatal(err)
+			}
+			output := make(chan []byte, 1)
+			readError := make(chan error, 1)
+			go func() {
+				data, err := io.ReadAll(reader)
+				output <- data
+				readError <- err
+			}()
+			waitForStartedRush(t, cmd, 10*time.Second)
+			stderr := string(<-output)
+			if err := <-readError; err != nil {
+				t.Fatal(err)
+			}
+			if cmd.ProcessState.ExitCode() != 130 {
+				t.Fatalf("exit=%d; want 130", cmd.ProcessState.ExitCode())
+			}
+			if strings.Contains(stderr, "100%") || strings.Contains(stderr, "(0/0)") {
+				t.Fatal("processed all skipped batches after interruption")
+			}
+			if stdout := cmd.Stdout.(*lockedBuffer).String(); stdout != "" {
+				t.Fatalf("unexpected job output: %q", stdout)
+			}
+		})
+	}
+}
+
+func TestETACountsSkippedPartialBatchBeforeOtherJobsFinish(t *testing.T) {
+	journal := t.TempDir() + "/success"
+	if err := os.WriteFile(journal, []byte("sleep 30; echo old"+endMarkOfCMD), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := rushTestCommand(t, "new\nother\nold\n", "--eta", "-j", "1", "-n", "2", "-c", "-C", journal,
+		"--cleanup-time", "0", "sleep 30; echo {1}")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cmd.Process.Signal(os.Interrupt)
+		waitForStartedRush(t, cmd, 5*time.Second)
+		if cmd.ProcessState.ExitCode() != 130 || strings.Contains(cmd.Stderr.(*lockedBuffer).String(), "100%") {
+			t.Errorf("interruption incorrectly finished progress: exit=%d stderr=%s", cmd.ProcessState.ExitCode(), cmd.Stderr)
+		}
+	}()
+	waitForBufferContains(t, cmd.Stderr.(*lockedBuffer), "(1/2,", time.Second)
+}
+
+func TestCommandExpansionFailureStopsActiveProcesses(t *testing.T) {
+	for _, batch := range []int{1, 2} {
+		t.Run(strconv.Itoa(batch), func(t *testing.T) {
+			dir := t.TempDir()
+			pidFile, journal := dir+"/pids", dir+"/success"
+			original := "echo old" + endMarkOfCMD
+			if err := os.WriteFile(journal, []byte(original), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// Waiting for the PID file makes the expansion failure occur only
+			// after the long-running command has started its descendant.
+			command := fmt.Sprintf(`case "{1}" in hold*) trap '' INT; sleep 30 & echo "$$ $!" > %q; wait;; *) while [ ! -s %q ]; do sleep 0.01; done;; esac; echo '{2@[}'`, pidFile, pidFile)
+			var input strings.Builder
+			for _, record := range []string{"hold", "fast", "fast", "fast"} {
+				fmt.Fprintln(&input, record)
+				if batch == 2 {
+					fmt.Fprintln(&input, "padding")
+				}
+			}
+			fmt.Fprintln(&input, "bad=extra")
+			t.Cleanup(func() {
+				data, _ := os.ReadFile(pidFile)
+				fields := strings.Fields(string(data))
+				if len(fields) == 2 {
+					parent, _ := strconv.Atoi(fields[0])
+					child, _ := strconv.Atoi(fields[1])
+					if parent > 0 && (processRunning(parent) || processRunning(child)) {
+						_ = syscall.Kill(-parent, syscall.SIGKILL)
+					}
+				}
+			})
+			cmd := rushTestCommand(t, input.String(), "-j", "2", "-n", strconv.Itoa(batch), "-d", "=", "-c", "-C", journal,
+				"--cleanup-time", "0", "--propagate-exit-status=false", command)
+			waitForRush(t, cmd, 5*time.Second)
+			data, err := os.ReadFile(pidFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pids := strings.Fields(string(data))
+			if len(pids) != 2 {
+				t.Fatalf("unexpected PID record: %q", data)
+			}
+			for _, text := range pids {
+				pid, err := strconv.Atoi(text)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertProcessStopped(t, pid, time.Second)
+			}
+			if cmd.ProcessState.ExitCode() != 1 || !strings.Contains(cmd.Stderr.(*lockedBuffer).String(), "fill command") {
+				t.Fatalf("exit=%d stderr=%s", cmd.ProcessState.ExitCode(), cmd.Stderr)
+			}
+			data, err = os.ReadFile(journal)
+			if err != nil || !bytes.HasPrefix(data, []byte(original)) || len(data) <= len(original) {
+				t.Fatalf("completed command records were lost: %q, err=%v", data, err)
+			}
+		})
+	}
+}
 
 // lowFileLimitCommand applies both limits before exec so the Go runtime cannot
 // raise the soft limit again. The parent test process keeps its original limit.
@@ -130,6 +285,33 @@ func TestLowFileLimitHugeJobCount(t *testing.T) {
 	waitForRush(t, cmd, 5*time.Second)
 	if cmd.ProcessState.ExitCode() != 0 || cmd.Stdout.(*lockedBuffer).String() != "x\n" {
 		t.Fatalf("exit=%d stderr=%s", cmd.ProcessState.ExitCode(), cmd.Stderr.(*lockedBuffer).String())
+	}
+}
+
+func TestOutputPreservedWhenInputReadOrSetupFails(t *testing.T) {
+	for _, failure := range []string{"input-read", "file-limit"} {
+		t.Run(failure, func(t *testing.T) {
+			path := t.TempDir() + "/output"
+			original := []byte("keep previous output\n")
+			if err := os.WriteFile(path, original, 0600); err != nil {
+				t.Fatal(err)
+			}
+			var cmd *exec.Cmd
+			if failure == "input-read" {
+				// This file can be statted and opened, but reading address zero fails.
+				cmd = rushTestCommand(t, "", "-i", "/proc/self/mem", "-o", path, "echo {}")
+			} else {
+				cmd = lowFileLimitCommand(t, "x\n", "-r", "100", "-o", path, "echo {}")
+			}
+			waitForRush(t, cmd, 5*time.Second)
+			if cmd.ProcessState.ExitCode() == 0 {
+				t.Fatal("expected input or setup failure")
+			}
+			data, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(data, original) {
+				t.Fatalf("output changed before execution: %q, err=%v", data, err)
+			}
+		})
 	}
 }
 
@@ -455,10 +637,12 @@ func TestTimeoutKillsChildProcess(t *testing.T) {
 }
 
 func TestTimeoutIs124WithoutChildStatusPropagation(t *testing.T) {
-	cmd := rushTestCommand(t, "x\n", "-t", "1", "--propagate-exit-status=false", "sleep", "30")
-	waitForRush(t, cmd, 5*time.Second)
-	if code := cmd.ProcessState.ExitCode(); code != 124 {
-		t.Fatalf("exit code: %d; want 124\nstderr:\n%s", code, cmd.Stderr)
+	for _, input := range []string{"sleep 30\n", "exit 7\nsleep 30\n"} {
+		cmd := rushTestCommand(t, input, "-j", "1", "-t", "1", "--cleanup-time", "0", "--propagate-exit-status=false", "{}")
+		waitForRush(t, cmd, 5*time.Second)
+		if code := cmd.ProcessState.ExitCode(); code != 124 {
+			t.Errorf("input=%q: exit code: %d; want 124\nstderr:\n%s", input, code, cmd.Stderr)
+		}
 	}
 }
 

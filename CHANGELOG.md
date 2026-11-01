@@ -1,10 +1,10 @@
 - rush v0.11.1
-    - Limit concurrency on Unix by the open-file limit, reserving descriptors for pipes, process handles, and buffered retry output to prevent `too many open files` failures.
-    - Close each `-i/--infile` input after reading it instead of keeping all input files open until exit.
-    - Stop surviving child processes after command failures, including output-pipe drain timeouts, before retrying or returning.
-    - Clean up buffered output files when process registration fails after launch.
-    - Size the output channel by the effective concurrency to avoid excessive allocations and panics when a large `--jobs` value is reduced.
-    - Exclude unused retry-output reservations with `-e/--stop-on-error` so they do not unnecessarily reduce concurrency or prevent jobs from starting.
+    - Prevent file-descriptor exhaustion with many jobs or input files.
+    - Fix child-process cleanup, executable exclusions, and hangs during failures, retries, and interrupts.
+    - Fix `--continue` matching and concurrent access; reject damaged or ambiguous records and keep dry runs read-only.
+    - Reject invalid or conflicting file paths, handle I/O failures promptly, and fix named-pipe output and `--pipe` trimming.
+    - Fix path and placeholder expansion; preserve input braces, undefined variables, and unsupported expressions.
+    - Correct timeout/signal exit statuses and retain interrupted retry output.
 - rush v0.11.0
     - **Add `--delay`, `--load`, and `--memfree` to stagger job starts and limit starts by system load or available memory**. Under severe memory pressure, stop and retry the youngest job without using its retry allowance. [#65](https://github.com/shenwei356/rush/issues/65)
     - **Add `--pipe` to send each `-n` record batch to the command's standard input**, preserving terminating record delimiters and replaying the batch for retries. `--continue` distinguishes batches by their input digest. [#22](https://github.com/shenwei356/rush/issues/22)
