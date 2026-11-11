@@ -1,4 +1,5 @@
 - rush v0.11.2
+    - `--eta`: Show total elapsed time when the progress bar completes.
     - Fix Windows timeouts incorrectly returning exit status 1 when a child is still exiting during cleanup.
 - rush v0.11.1
     - Prevent file-descriptor exhaustion with many jobs or input files.

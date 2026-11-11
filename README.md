@@ -370,7 +370,7 @@ Flags:
   -q, --escape                    escape special symbols like $ which you can customize by flag
                                   -Q/--escape-symbols
   -Q, --escape-symbols string     symbols to escape (default "$#&`")
-      --eta                       show ETA and processed job counts
+      --eta                       show ETA, processed job counts, and elapsed time
   -d, --field-delimiter string    field delimiter in records, support regular expression (default "\\s+")
   -h, --help                      help for rush
   -I, --immediate-output          print output immediately and interleaved, to aid debugging
@@ -407,6 +407,7 @@ Flags:
 `--eta` counts completed and failed jobs, plus successful jobs skipped by
 `--continue`. Empty input records and batches that expand to empty commands
 are excluded from the total. Cancelled jobs do not count as processed.
+The completed progress bar shows the total elapsed time.
 
 `--delay` sets the minimum interval between process starts in seconds, for example
 `--delay 0.5`. `--load 100%` allows a new job only when the system's one-minute

@@ -525,6 +525,7 @@ Resource limits:
 				pb.OptionSetDescription("processed jobs: "),
 				pb.OptionShowCount(),
 				pb.OptionShowIts(),
+				pb.OptionShowElapsedTimeOnFinish(),
 				pb.OptionSetItsString("jobs"),
 				pb.OptionSetRenderBlankState(true),
 				pb.OptionSetTheme(pb.Theme{
@@ -892,7 +893,7 @@ func executeArgs(args []string) {
 func init() {
 	RootCmd.Flags().BoolP("verbose", "", false, "print verbose information")
 	RootCmd.Flags().BoolP("version", "V", false, `print version information and check for update`)
-	RootCmd.Flags().BoolP("eta", "", false, `show ETA and processed job counts`)
+	RootCmd.Flags().BoolP("eta", "", false, `show ETA, processed job counts, and elapsed time`)
 
 	RootCmd.Flags().IntP("jobs", "j", runtime.NumCPU(), "run n jobs in parallel (default value depends on your device)")
 	RootCmd.Flags().Float64("delay", 0, "minimum seconds between starting jobs (supports fractions)")
