@@ -173,6 +173,62 @@ func TestWindowsForceCleanupContinuesAfterMemberFailure(t *testing.T) {
 	}
 }
 
+// TestWindowsForceCleanupWaitsForExitingProcess exercises access denial while
+// the process is still alive, followed by either exit or a genuine denial.
+func TestWindowsForceCleanupWaitsForExitingProcess(t *testing.T) {
+	for _, exits := range []bool{true, false} {
+		t.Run(fmt.Sprintf("exits=%t", exits), func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestWindowsCleanupHelperProcess$")
+			cmd.Env = append(os.Environ(), "RUSH_WINDOWS_CLEANUP_HELPER=1")
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+			pid := uint32(cmd.Process.Pid)
+			h, identity, err := openIdentifiedProcess(pid, windows.SYNCHRONIZE)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer windows.CloseHandle(h)
+			root := windowsRecord{pid: pid, handle: h, identity: identity, name: "cleanup-helper"}
+			known := map[uint32]windowsProcess{pid: {pid: pid, identity: identity, name: root.name}}
+			originalOpen := openWindowsCleanupProcess
+			defer func() { openWindowsCleanupProcess = originalOpen }()
+			var exited chan error
+			openWindowsCleanupProcess = func(target uint32, access uint32) (windows.Handle, uint64, error) {
+				if target != pid {
+					return originalOpen(target, access)
+				}
+				// Omit terminate rights to obtain a real ERROR_ACCESS_DENIED.
+				// Delay exit beyond the old zero-time wait, without mocking waits.
+				if exits {
+					exited = make(chan error, 1)
+					go func() {
+						time.Sleep(100 * time.Millisecond)
+						exited <- cmd.Process.Kill()
+					}()
+				}
+				return originalOpen(target, windows.SYNCHRONIZE)
+			}
+			controller := &windowsController{opts: &Options{}}
+			err = controller.forceTree(root, known)
+			if exits {
+				if exited == nil {
+					t.Fatal("cleanup did not attempt termination")
+				}
+				if killErr := <-exited; killErr != nil {
+					t.Fatal(killErr)
+				}
+				if err != nil {
+					t.Fatalf("exiting process caused cleanup failure: %v", err)
+				}
+			} else if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+				t.Fatalf("permission error lost: %v", err)
+			}
+		})
+	}
+}
+
 func TestWindowsExitedCommandCleanupPreservesRetries(t *testing.T) {
 	opts := &Options{Jobs: 1, Retries: 1, PropExitStatus: true, CleanupTime: 0}
 	got := observeRun(t, opts, "exit /b 7")

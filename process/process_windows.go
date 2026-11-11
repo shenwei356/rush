@@ -371,8 +371,12 @@ func (c *windowsController) forceTree(root windowsRecord, known map[uint32]windo
 			}
 			err = windows.TerminateProcess(h, 1)
 			if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-				// Windows also returns access denied for an already-exited process.
-				status, waitErr := windows.WaitForSingleObject(h, 0)
+				// Termination can be in progress after Ctrl+Break or another
+				// kill. Wait on this identified handle within the shared cleanup
+				// deadline before treating access denied as a real failure.
+				remaining := max(time.Until(deadline), 0)
+				waitMillis := uint32((remaining + time.Millisecond - 1) / time.Millisecond)
+				status, waitErr := windows.WaitForSingleObject(h, waitMillis)
 				if waitErr == nil && status == windows.WAIT_OBJECT_0 {
 					windows.CloseHandle(h)
 					continue
