@@ -48,6 +48,8 @@ Major:
 - **Retry** (`-r`). (`--retry-failed --joblog` in GNU parallel)
 - **Start and resource limits**: `--delay`, `--load`, and `--memfree` stagger new jobs
   and wait for available system capacity.
+- **Wait before starting jobs**: wait for a named process to appear or disappear,
+  optionally requiring the condition to remain satisfied for a specified time.
 - **Safe exit after capturing Ctrl-C**: Linux uses native `SIGINT`/`SIGKILL` signals;
   Windows uses `Ctrl+C`/`Ctrl+Break` followed by `taskkill /T /F` to terminate the process tree.
 - **Continue** (`-c`). (`--resume --joblog` in GNU parallel,
@@ -199,10 +201,22 @@ And then:
 
 ## Usage
 
+- [Command-line reference](#command-line-reference)
+- [Waiting for processes](#waiting-for-processes)
+- [Job starts and resource limits](#job-starts-and-resource-limits)
+- [Progress reporting](#progress-reporting)
+
+### Command-line reference
+
+Run `rush --help` to list all options.
+
+<details>
+<summary>Full command-line help</summary>
+
 ```text
 rush -- a cross-platform command-line tool for executing jobs in parallel
 
-Version: 0.11.1
+Version: 0.12.0
 
 Author: Wei Shen <shenwei356@gmail.com>
 
@@ -279,7 +293,34 @@ Preset variable (macro):
   For multi-value flags (-i, -v, --no-stop-exes, --no-kill-exes), repeat the flag
   or use CSV quoting, e.g., -v '"p=a,b"' for a value containing a comma.
 
+Waiting before starting jobs:
+  - -W/--wait-for-process NAME waits for a process name to appear;
+    -w/--wait-for-process-exit NAME waits until all matching processes exit.
+  - -U/--wait-for-process-duration sets how many seconds the condition must remain
+    satisfied (default 0). A contrary observation restarts the timer.
+  - -u/--wait-for-process-interval sets the seconds between checks (default 1;
+    supports fractions). Processes appearing and exiting between checks can be
+    missed. Shorter intervals reduce this risk but increase scanning overhead.
+  - Names match exactly by default. -R/--wait-for-process-regexp enables regular
+    expressions (partial matching; use ^ and $ for a whole name). Matching ignores
+    case by default on Windows. Use the process name, not a command line or path.
+    Checks exclude rush itself.
+  - The condition is checked only before the run. Jobs then follow -j and other
+    start limits. --dry-run skips waiting; Ctrl+C cancels it.
+
 Resource limits:
+  - -j/--jobs limits concurrent jobs. --delay 0.5 leaves at least 0.5 seconds
+    between job starts.
+  - --load 4 starts jobs only while the one-minute system load is below 4.
+    --load 100% uses the CPU count as the threshold.
+  - --memfree 1G waits for at least 1 GiB of available physical memory;
+    0 disables this limit. Uppercase size suffixes use powers of 1024,
+    and lowercase suffixes use powers of 1000.
+  - Below half the --memfree threshold, rush stops the youngest running job
+    and requeues it without consuming a retry attempt. Its buffered stdout
+    is discarded; stderr already written remains visible.
+  - These limits apply to starts and retries. --dry-run validates the options
+    without waiting for resources.
   - Concurrent jobs (Unix): rush reduces concurrency to fit its open-file limit
     and reports a warning. If one job cannot fit, raise ulimit -n or reduce --retries.
   - Commands opening many files or using many threads: child programs' own
@@ -356,93 +397,155 @@ Examples:
   More examples: https://github.com/shenwei356/rush
 
 Flags:
-  -v, --assign strings            assign the value val to the variable var (format: var=val, val also
-                                  supports replacement strings)
-      --cleanup-time int          time to allow child processes to clean up between stop / kill signals
-                                  (unit: seconds, 0 for no time) (default 3) (default 3)
-  -c, --continue                  continue jobs. NOTES: 1) successful commands are saved in file (given
-                                  by flag -C/--succ-cmd-file); 2) if the file does not exist, rush saves
-                                  data so we can continue jobs next time; 3) if the file exists, rush
-                                  ignores jobs in it and update the file; 4) skipped jobs are silent
-                                  unless --verbose is used
-      --delay float               minimum seconds between starting jobs (supports fractions)
-      --dry-run                   print command but not run
-  -q, --escape                    escape special symbols like $ which you can customize by flag
-                                  -Q/--escape-symbols
-  -Q, --escape-symbols string     symbols to escape (default "$#&`")
-      --eta                       show ETA, processed job counts, and elapsed time
-  -d, --field-delimiter string    field delimiter in records, support regular expression (default "\\s+")
-  -h, --help                      help for rush
-  -I, --immediate-output          print output immediately and interleaved, to aid debugging
-  -i, --infile strings            input data file, multi-values supported
-  -j, --jobs int                  run n jobs in parallel (default value depends on your device) (default 16)
-  -k, --keep-order                keep output in order of input
-      --load string               start jobs only while system load is below this value (number or
-                                  percent of CPUs)
-      --memfree string            minimum available memory before starting jobs (bytes or K/M/G/T/P
-                                  suffix; 0 disables)
-      --no-kill-exes strings      exe names to exclude from kill signal, example: mspdbsrv.exe; or use
-                                  all for all exes (default none)
-      --no-stop-exes strings      exe names to exclude from stop signal, example: mspdbsrv.exe; or use
-                                  all for all exes (default none)
-  -n, --nrecords int              number of records sent to a command (default 1)
-  -o, --out-file string           out file ("-" for stdout) (default "-")
-      --pipe                      send each group of records to the command's standard input
-      --print-retry-output        print buffered retry output (final attempt is always printed) (default
-                                  true)
-      --propagate-exit-status     propagate child exit status up to the exit status of rush (default true)
-  -D, --record-delimiter string   record delimiter (default is "\n") (default "\n")
-  -J, --records-join-sep string   record separator for joining multi-records (default is "\n") (default "\n")
-  -r, --retries int               maximum retries (default 0)
-      --retry-interval float      retry interval (unit: second, supports fractions like 0.5) (default 0)
-  -e, --stop-on-error             stop scheduling and clean up active child processes on first error
-  -C, --succ-cmd-file string      file for saving successful commands (default "successful_cmds.rush")
-  -t, --timeout int               timeout of a command (unit: seconds, 0 for no timeout) (default 0)
-  -T, --trim string               trim white space (" \t\r\n") in input (available values: "l" for left,
-                                  "r" for right, "lr", "rl", "b" for both side)
-      --verbose                   print verbose information
-  -V, --version                   print version information and check for update
+  -v, --assign strings                    assign the value val to the variable var (format: var=val, val
+                                          also supports replacement strings)
+      --cleanup-time int                  time to allow child processes to clean up between stop / kill
+                                          signals (unit: seconds, 0 for no time) (default 3) (default 3)
+  -c, --continue                          continue jobs. NOTES: 1) successful commands are saved in file
+                                          (given by flag -C/--succ-cmd-file); 2) if the file does not
+                                          exist, rush saves data so we can continue jobs next time; 3)
+                                          if the file exists, rush ignores jobs in it and update the
+                                          file; 4) skipped jobs are silent unless --verbose is used
+      --delay float                       minimum seconds between starting jobs (supports fractions)
+      --dry-run                           print command but not run
+  -q, --escape                            escape special symbols like $ which you can customize by flag
+                                          -Q/--escape-symbols
+  -Q, --escape-symbols string             symbols to escape (default "$#&`")
+      --eta                               show ETA, processed job counts, and elapsed time
+  -d, --field-delimiter string            field delimiter in records, support regular expression
+                                          (default "\\s+")
+  -h, --help                              help for rush
+  -I, --immediate-output                  print output immediately and interleaved, to aid debugging
+  -i, --infile strings                    input data file, multi-values supported
+  -j, --jobs int                          run n jobs in parallel (default value depends on your device)
+                                          (default 16)
+  -k, --keep-order                        keep output in order of input
+      --load string                       start jobs only while system load is below this value (number
+                                          or percent of CPUs)
+      --memfree string                    minimum available memory before starting jobs (bytes or
+                                          K/M/G/T/P suffix; 0 disables)
+      --no-kill-exes strings              exe names to exclude from kill signal, example: mspdbsrv.exe;
+                                          or use all for all exes (default none)
+      --no-stop-exes strings              exe names to exclude from stop signal, example: mspdbsrv.exe;
+                                          or use all for all exes (default none)
+  -n, --nrecords int                      number of records sent to a command (default 1)
+  -o, --out-file string                   out file ("-" for stdout) (default "-")
+      --pipe                              send each group of records to the command's standard input
+      --print-retry-output                print buffered retry output (final attempt is always printed)
+                                          (default true)
+      --propagate-exit-status             propagate child exit status up to the exit status of rush
+                                          (default true)
+  -D, --record-delimiter string           record delimiter (default is "\n") (default "\n")
+  -J, --records-join-sep string           record separator for joining multi-records (default is "\n")
+                                          (default "\n")
+  -r, --retries int                       maximum retries (default 0)
+      --retry-interval float              retry interval (unit: second, supports fractions like 0.5)
+                                          (default 0)
+  -e, --stop-on-error                     stop scheduling and clean up active child processes on first error
+  -C, --succ-cmd-file string              file for saving successful commands (default
+                                          "successful_cmds.rush")
+  -t, --timeout int                       timeout of a command (unit: seconds, 0 for no timeout) (default 0)
+  -T, --trim string                       trim white space (" \t\r\n") in input (available values: "l"
+                                          for left, "r" for right, "lr", "rl", "b" for both side)
+      --verbose                           print verbose information
+  -V, --version                           print version information and check for update
+  -W, --wait-for-process string           wait for a process name to appear before starting any jobs
+  -U, --wait-for-process-duration float   seconds the process condition must stay satisfied (supports
+                                          fractions)
+  -w, --wait-for-process-exit string      wait until no process has this name before starting any jobs
+  -u, --wait-for-process-interval float   seconds between process checks (positive, supports fractions)
+                                          (default 1)
+  -R, --wait-for-process-regexp           interpret the waiting process name as a regular expression
 ```
 
-`--eta` counts completed and failed jobs, plus successful jobs skipped by
-`--continue`. Empty input records and batches that expand to empty commands
-are excluded from the total. Cancelled jobs do not count as processed.
-The completed progress bar shows the total elapsed time.
+</details>
 
-`--delay` sets the minimum interval between process starts in seconds, for example
-`--delay 0.5`. `--load 100%` allows a new job only when the system's one-minute
-load average is below the number of CPUs; a number such as `--load 4` sets an
-absolute threshold. `--memfree 1G` waits until at least 1 GiB of physical memory
-is available. Uppercase size suffixes use powers of 1024, and lowercase suffixes
-use powers of 1000. Zero disables the memory limit; nonzero sizes below one
-byte are rejected. These limits apply to starts and retries; `-j` still caps
-the number of concurrent jobs. `--dry-run` validates the options without
-waiting for resources.
+### Waiting for processes
 
-On Unix, rush also limits concurrency to leave room for its pipes, process
-handles, and output temporary files. It counts existing open files where
-`/dev/fd` is available and includes output retained across retries in the budget.
-It warns when this reduces the requested job count. If the budget cannot fit
-one job, it exits with an error; increase `ulimit -n` or reduce `--retries`.
-`-I` and `-e/--stop-on-error` do not reserve files for earlier retry attempts:
-`-I` writes output immediately, and `-e` stops on the first failure without
-retrying. `--dry-run` skips this budget.
-The `{?}` replacement continues to use the requested `-j` value.
-This protects rush's descriptors; child programs may still exhaust their own
-file, process, or thread limits. For multithreaded commands, set both `-j` and
-the program's thread count to suit the available resources.
+Wait once before starting any jobs, either for a process to appear or for all
+matching processes to disappear. Choose one of `-W` and `-w`:
 
-If available memory falls below half the `--memfree` threshold, rush stops the
-youngest running job and places it back in the queue. Its buffered standard
-output is discarded; standard error already written may remain visible. This
-restart does not use one of its `-r/--retries` attempts. Output from earlier failed
-attempts still follows `--print-retry-output`, including when a queued restart is
-cancelled; buffered-output read and cleanup errors are reported.
-On Windows, the load average is estimated from the processor queue and may
-initially read as zero. Resource checks use system-wide values, so memory
-limits imposed on a container may differ from the reported available memory.
+| Short option | Long option | Meaning | Default |
+| --- | --- | --- | --- |
+| `-W NAME` | `--wait-for-process` | Wait for at least one matching process to appear. | Disabled |
+| `-w NAME` | `--wait-for-process-exit` | Wait until no matching process remains. | Disabled |
+| `-U SECONDS` | `--wait-for-process-duration` | Require the condition to stay satisfied for this long. | `0` |
+| `-u SECONDS` | `--wait-for-process-interval` | Pause between checks; must be positive. | `1` |
+| `-R` | `--wait-for-process-regexp` | Match names with a Go regular expression. | Off |
 
-    seq 10 | rush -j 4 --delay 0.5 --load 100% --memfree 1G 'run-test {}'
+Both time options accept fractions. A contrary observation resets the `-U`
+timer; if the process is already absent, timing starts at the first check.
+There is no total waiting timeout; `-t` still limits individual jobs.
+
+```sh
+# -W: wait for worker to appear, checking every 0.1 seconds.
+seq 10 | rush -W worker -u 0.1 'run-task {}'
+
+# -w: wait until neither worker1 nor worker2 has been seen for 30 seconds.
+seq 10 | rush -w '^worker[12]$' -R -U 30 'run-task {}'
+```
+
+**Name matching.** Names match exactly by default, ignoring case on Windows
+(include `.exe`, for example `WINWORD.EXE`). Matching does not include paths or
+arguments; a Python script usually runs as `python` or `python3`. With `-R`,
+expressions match any part of the name: `word` matches `winword.exe`; use
+`^winword\.exe$` for the whole name. Windows expressions ignore case by default;
+`(?-i)` enables case sensitivity, and `(?i)` ignores case on other platforms.
+
+**Polling limits.** The first check is immediate. Each later check follows the
+previous scan and the `-u` pause, shortened if the `-U` duration is about to end.
+Only visible processes are checked; rush itself and Unix zombies are excluded.
+A process that appears and exits between checks can be missed, as can a brief
+absence. `-U` tracks observations, not unobserved changes. Shorter intervals
+reduce missed changes at the cost of more scanning, without guaranteeing
+detection of every short-lived process. Process presence does not imply service
+readiness.
+
+Waiting happens before opening output or successful-command files. Once
+released, jobs follow `-j` and the resource limits below; later changes to the
+watched processes do not pause jobs. `--dry-run` skips waiting, `--verbose` prints
+a waiting notice, and `Ctrl+C` cancels the wait.
+
+### Job starts and resource limits
+
+These limits apply to each job start, including retries:
+
+| Option | Effect |
+| --- | --- |
+| `-j 4` | Run at most four jobs concurrently. |
+| `--delay 0.5` | Leave at least half a second between starts. |
+| `--load 100%` | Start only when the one-minute system load is below the CPU count. Use a number such as `--load 4` for an absolute threshold. |
+| `--memfree 1G` | Start only when at least 1 GiB of physical memory is available. `0` disables the limit. |
+
+```sh
+seq 10 | rush -j 4 --delay 0.5 --load 100% --memfree 1G 'run-task {}'
+```
+
+Memory suffixes use powers of 1024 when uppercase (`K/M/G/T/P`) and 1000 when
+lowercase. Nonzero sizes below one byte are rejected. `--dry-run` validates the
+options without waiting for resources.
+
+**Memory pressure.** Below half the `--memfree` threshold, rush stops the youngest
+running job and requeues it without consuming a retry attempt. Its buffered
+standard output is discarded; standard error already written remains visible.
+Output from earlier failed attempts still follows `--print-retry-output`.
+
+**File and thread limits.** On Unix, rush may reduce concurrency to fit its
+open-file limit and prints a warning. If even one job cannot fit, it exits;
+raise `ulimit -n` or reduce `--retries`. Child programs retain their own file and
+thread limits, so set both `-j` and each program's thread count accordingly.
+The `{?}` placeholder continues to use the requested `-j` value.
+
+**Platform differences.** Windows load is estimated from the processor queue and
+may initially be zero. Resource checks use system-wide values; container memory
+limits may differ from the reported available memory.
+
+### Progress reporting
+
+`--eta` shows progress, estimated time remaining, and total elapsed time when
+finished. Counts include completed and failed jobs and successes skipped by
+`--continue`; they exclude cancelled jobs, empty input records, and batches that
+expand to empty commands.
 
 
 ## Examples

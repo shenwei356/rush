@@ -149,7 +149,34 @@ Preset variable (macro):
   For multi-value flags (-i, -v, --no-stop-exes, --no-kill-exes), repeat the flag
   or use CSV quoting, e.g., -v '"p=a,b"' for a value containing a comma.
 
+Waiting before starting jobs:
+  - -W/--wait-for-process NAME waits for a process name to appear;
+    -w/--wait-for-process-exit NAME waits until all matching processes exit.
+  - -U/--wait-for-process-duration sets how many seconds the condition must remain
+    satisfied (default 0). A contrary observation restarts the timer.
+  - -u/--wait-for-process-interval sets the seconds between checks (default 1;
+    supports fractions). Processes appearing and exiting between checks can be
+    missed. Shorter intervals reduce this risk but increase scanning overhead.
+  - Names match exactly by default. -R/--wait-for-process-regexp enables regular
+    expressions (partial matching; use ^ and $ for a whole name). Matching ignores
+    case by default on Windows. Use the process name, not a command line or path.
+    Checks exclude rush itself.
+  - The condition is checked only before the run. Jobs then follow -j and other
+    start limits. --dry-run skips waiting; Ctrl+C cancels it.
+
 Resource limits:
+  - -j/--jobs limits concurrent jobs. --delay 0.5 leaves at least 0.5 seconds
+    between job starts.
+  - --load 4 starts jobs only while the one-minute system load is below 4.
+    --load 100%% uses the CPU count as the threshold.
+  - --memfree 1G waits for at least 1 GiB of available physical memory;
+    0 disables this limit. Uppercase size suffixes use powers of 1024,
+    and lowercase suffixes use powers of 1000.
+  - Below half the --memfree threshold, rush stops the youngest running job
+    and requeues it without consuming a retry attempt. Its buffered stdout
+    is discarded; stderr already written remains visible.
+  - These limits apply to starts and retries. --dry-run validates the options
+    without waiting for resources.
   - Concurrent jobs (Unix): rush reduces concurrency to fit its open-file limit
     and reports a warning. If one job cannot fit, raise ulimit -n or reduce --retries.
   - Commands opening many files or using many threads: child programs' own
@@ -198,6 +225,13 @@ Resource limits:
 		// -----------------------------------------------------------------
 
 		checkError(validateRunFiles(config))
+		if config.ProcessWait.name != "" && !config.DryRun {
+			status, waitErr := waitBeforeRun(config.ProcessWait, config.Verbose)
+			checkError(waitErr)
+			if status != 0 {
+				os.Exit(status)
+			}
+		}
 
 		// TmpOutputDataBuffer = config.BufferSize
 		if config.DryRun {
@@ -897,6 +931,11 @@ func init() {
 
 	RootCmd.Flags().IntP("jobs", "j", runtime.NumCPU(), "run n jobs in parallel (default value depends on your device)")
 	RootCmd.Flags().Float64("delay", 0, "minimum seconds between starting jobs (supports fractions)")
+	RootCmd.Flags().StringP("wait-for-process", "W", "", "wait for a process name to appear before starting any jobs")
+	RootCmd.Flags().StringP("wait-for-process-exit", "w", "", "wait until no process has this name before starting any jobs")
+	RootCmd.Flags().BoolP("wait-for-process-regexp", "R", false, "interpret the waiting process name as a regular expression")
+	RootCmd.Flags().Float64P("wait-for-process-duration", "U", 0, "seconds the process condition must stay satisfied (supports fractions)")
+	RootCmd.Flags().Float64P("wait-for-process-interval", "u", 1, "seconds between process checks (positive, supports fractions)")
 	RootCmd.Flags().String("load", "", "start jobs only while system load is below this value (number or percent of CPUs)")
 	RootCmd.Flags().String("memfree", "", "minimum available memory before starting jobs (bytes or K/M/G/T/P suffix; 0 disables)")
 	RootCmd.Flags().StringP("out-file", "o", "-", `out file ("-" for stdout)`)
@@ -1043,6 +1082,7 @@ type Config struct {
 	MaxLoad       float64
 	MinFreeMemory uint64
 	OutFile       string
+	ProcessWait   processWait // One-time process condition before starting the run.
 
 	Infiles []string
 
@@ -1118,6 +1158,18 @@ func getConfigs(cmd *cobra.Command) Config {
 	checkError(err)
 	minFreeMemory, err := parseMemorySize(getFlagString(cmd, "memfree"))
 	checkError(err)
+	processWait, err := parseProcessWait(
+		getFlagString(cmd, "wait-for-process"), getFlagString(cmd, "wait-for-process-exit"),
+		getFlagFloat64(cmd, "wait-for-process-duration"), getFlagFloat64(cmd, "wait-for-process-interval"),
+		cmd.Flags().Changed("wait-for-process-duration"), cmd.Flags().Changed("wait-for-process-interval"),
+		getFlagBool(cmd, "wait-for-process-regexp"),
+	)
+	checkError(err)
+	for _, flag := range []string{"wait-for-process", "wait-for-process-exit"} {
+		if cmd.Flags().Changed(flag) && getFlagString(cmd, flag) == "" {
+			checkError(fmt.Errorf("--%s requires a nonempty process name", flag))
+		}
+	}
 
 	return Config{
 		Verbose: getFlagBool(cmd, "verbose"),
@@ -1129,6 +1181,7 @@ func getConfigs(cmd *cobra.Command) Config {
 		MaxLoad:       maxLoad,
 		MinFreeMemory: minFreeMemory,
 		OutFile:       getFlagString(cmd, "out-file"),
+		ProcessWait:   processWait,
 
 		Infiles: getFlagStringSlice(cmd, "infile"),
 

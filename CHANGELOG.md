@@ -1,4 +1,9 @@
-- rush v0.11.2
+- rush v0.12.0
+    - **Add `-W/--wait-for-process` and `-w/--wait-for-process-exit` to wait for processes to appear or disappear before starting jobs**;
+        - Use `-U/--wait-for-process-duration` to require the condition to remain satisfied for a specified time.
+        - Use `-R/--wait-for-process-regexp` to match names with a regular expression.
+        - Set the checking interval with `-u/--wait-for-process-interval` (default 1 second); short-lived processes may be missed between checks.
+    - Explain `--delay`, `--load`, and `--memfree` in help; reorganize the usage guide into sections for process waiting, resource limits, and progress reporting.
     - `--eta`: Show total elapsed time when the progress bar completes.
     - Fix Windows timeouts incorrectly returning exit status 1 when a child is still exiting during cleanup.
 - rush v0.11.1

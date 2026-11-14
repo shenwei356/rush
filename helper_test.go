@@ -18,6 +18,16 @@ type versionTestTransport struct {
 	closedFile string // closedFile records response-body release in the subprocess.
 }
 
+// nextVersionForTest keeps the newer-release fixture ahead of version bumps.
+func nextVersionForTest() string {
+	major, _, _ := strings.Cut(VERSION, ".")
+	n, err := strconv.Atoi(major)
+	if err != nil {
+		panic(fmt.Sprintf("invalid test version %q: %v", VERSION, err))
+	}
+	return fmt.Sprintf("%d.0.0", n+1)
+}
+
 func (transport versionTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if transport.mode == "network-error" {
 		return nil, fmt.Errorf("injected transport failure")
@@ -32,7 +42,7 @@ func (transport versionTestTransport) RoundTrip(request *http.Request) (*http.Re
 		Body: &versionResponseBody{Reader: strings.NewReader("release page"), closedFile: transport.closedFile},
 	}
 	if request.URL.Path == "/shenwei356/rush/releases/latest" {
-		target := "/shenwei356/rush/releases/tag/v0.12.0"
+		target := "/shenwei356/rush/releases/tag/v" + nextVersionForTest()
 		switch transport.mode {
 		case "current":
 			target = "/shenwei356/rush/releases/tag/v" + VERSION
@@ -74,15 +84,16 @@ func (body *versionResponseBody) Close() error {
 }
 
 func TestVersionCheckResponses(t *testing.T) {
+	nextVersion := nextVersionForTest()
 	for _, test := range []struct {
 		mode, diagnostic string
 		success          bool
 	}{
-		{"new", "rush v0.12.0 at https://github.com/shenwei356/rush/releases/tag/v0.12.0", true},
+		{"new", "rush v" + nextVersion + " at https://github.com/shenwei356/rush/releases/tag/v" + nextVersion, true},
 		{"current", "You are using the latest version", true},
 		{"current-query", "You are using the latest version", true},
 		{"older", "Latest release: rush v0.1.0", true},
-		{"deadline", "rush v0.12.0 at", true},
+		{"deadline", "rush v" + nextVersion + " at", true},
 		{"http-error", "503", false},
 		{"no-release", "unexpected release URL", false},
 		{"wrong-repository", "unexpected release URL", false},
