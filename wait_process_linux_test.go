@@ -28,9 +28,7 @@ func TestProcessWaitBeforeAllJobs(t *testing.T) {
 			worker := testutil.NamedSleeper(t, dir, name)
 			startWorker := func() *exec.Cmd {
 				p := exec.Command(worker, "--test-sleep=30s")
-				if err := p.Start(); err != nil {
-					t.Fatal(err)
-				}
+				testutil.StartSleeper(t, p)
 				t.Cleanup(func() { _ = p.Process.Kill(); _ = p.Wait() })
 				return p
 			}

@@ -27,7 +27,11 @@ var Log *logging.Logger
 // their own Options.Verbose and never change this package-level default.
 var Verbose bool
 var TmpOutputDataBuffer = 1 << 20
-var OutputChunkSize = 16 << 10
+
+const defaultOutputChunkSize = 16 << 10
+
+// OutputChunkSize controls buffered output reads. Nonpositive values use the default.
+var OutputChunkSize = defaultOutputChunkSize
 var tmpfilePrefix = fmt.Sprintf("rush.%d.", os.Getpid())
 var createSpillFile = func() (*os.File, error) { return os.CreateTemp("", tmpfilePrefix) }
 var flushSpillFile = func(w *bufio.Writer) error { return w.Flush() }
@@ -355,7 +359,11 @@ func (c *Command) sendOutput(ch chan string, done chan<- error, initialErr error
 		done <- combineErrors(initialErr, readErr)
 		close(done)
 	}()
-	buf := make([]byte, OutputChunkSize)
+	size := OutputChunkSize
+	if size <= 0 {
+		size = defaultOutputChunkSize
+	}
+	buf := make([]byte, size)
 	for {
 		n, err := c.reader.Read(buf)
 		if n > 0 {
@@ -741,30 +749,41 @@ type Options struct {
 	Verbose             bool // Verbose enables start/finish logging for this run.
 	stopOnce            sync.Once
 	stopOnErrorOnce     sync.Once
-	forceStopInit       sync.Once
-	forceStopOnce       sync.Once
-	forceStop           chan struct{}
+	forceMu             sync.Mutex    // Serializes force requests with scheduler startup.
+	forceStop           chan struct{} // Used by standalone commands and before startup.
 	controller          processController
 	gate                *startGate
 	state               *runstate.State
 }
 
 func (o *Options) forceStopChannel() <-chan struct{} {
+	o.forceMu.Lock()
+	defer o.forceMu.Unlock()
 	if o.state != nil {
 		return o.state.ForceChan()
 	}
-	o.forceStopInit.Do(func() { o.forceStop = make(chan struct{}) })
+	return o.standaloneForceChannel()
+}
+
+// standaloneForceChannel returns the fallback channel while forceMu is held.
+func (o *Options) standaloneForceChannel() chan struct{} {
+	if o.forceStop == nil {
+		o.forceStop = make(chan struct{})
+	}
 	return o.forceStop
 }
+
+// ForceStop escalates cleanup, including when requested during scheduler startup.
 func (o *Options) ForceStop() {
+	o.forceMu.Lock()
+	defer o.forceMu.Unlock()
 	if o.state != nil {
 		o.state.Force()
 		return
 	}
-	o.forceStopOnce.Do(func() {
-		o.forceStopChannel()
-		close(o.forceStop)
-	})
+	if ch := o.standaloneForceChannel(); !isClosed(ch) {
+		close(ch)
+	}
 }
 func (o *Options) stopChildren() {
 	o.stopOnce.Do(func() {
@@ -872,11 +891,8 @@ func run4OutputContext[T commandInput](opts *Options, ctx context.Context, stop 
 			if err := c.Cleanup(); err != nil {
 				opts.state.Stop(runstate.Cause{Kind: runstate.Internal, Status: 1})
 			}
-			if opts.ETA {
-				// Only increment progress bar for commands that were not cancelled
-				if !c.cancelled {
-					_ = opts.ETABar.Add(1)
-				}
+			if opts.ETA && opts.ETABar != nil && !c.cancelled {
+				_ = opts.ETABar.Add(1)
 			}
 		}
 		for c := range commands {
@@ -940,8 +956,17 @@ func runContext[T commandInput](opts *Options, parent context.Context, stop cont
 			state.Cancel()
 		}
 	}
+	opts.forceMu.Lock()
+	if isClosed(opts.forceStop) {
+		state.Force()
+	}
+	opts.forceStop = nil
 	opts.state = state
+	opts.forceMu.Unlock()
 	jobs, limitErr := fileDescriptorJobLimit(opts)
+	if opts.Retries < 0 {
+		limitErr = fmt.Errorf("negative retry count: %d", opts.Retries)
+	}
 	if limitErr != nil {
 		// Keep the result channels usable so callers can observe setup failure.
 		jobs = 1
@@ -1307,6 +1332,10 @@ func combineWorker(input <-chan string, output chan<- string, wg *sync.WaitGroup
 }
 func contextFromCancel(cancel <-chan struct{}) (context.Context, context.CancelFunc) {
 	ctx, stop := context.WithCancel(context.Background())
+	if isClosed(cancel) {
+		stop()
+		return ctx, stop
+	}
 	go func() {
 		select {
 		case <-cancel:

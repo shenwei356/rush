@@ -178,7 +178,7 @@ func TestAdjacentInputBracesRemainLiteral(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			config := Config{
-				Jobs: 1, Greedy: true, GreedyCount: 1, EscapeCurlyBrackets: true,
+				DryRun: true, Jobs: 1, Greedy: true, GreedyCount: 1, EscapeCurlyBrackets: true,
 				reFieldDelimiter: regexp.MustCompile(","), AssignMap: map[string]string{"p": "changed", "deferred": "{#}"},
 			}
 			for _, passes := range []int{1, 3} {

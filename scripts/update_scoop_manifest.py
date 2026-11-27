@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Update the Scoop manifest from already published Windows release archives."""
 
+import gzip
 import hashlib
 import json
 import pathlib
@@ -33,10 +34,16 @@ def update(tag, assets_dir, manifest_path):
 
     for arch, filename in ARCHIVES.items():
         archive_path = assets_dir / filename
-        with tarfile.open(archive_path, "r:gz") as archive:
-            members = archive.getmembers()
-            if len(members) != 1 or members[0].name != "rush.exe" or not members[0].isfile():
-                raise ValueError(f"{filename} must contain only rush.exe at the archive root")
+        with gzip.open(archive_path, "rb") as payload:
+            with tarfile.open(fileobj=payload, mode="r|") as archive:
+                members = archive.getmembers()
+                if len(members) != 1 or members[0].name != "rush.exe" or not members[0].isfile():
+                    raise ValueError(f"{filename} must contain only rush.exe at the archive root")
+                if members[0].size == 0:
+                    raise ValueError(f"{filename} contains an empty rush.exe")
+            # Tar ends before the gzip trailer. Read to EOF to verify the checksum and size.
+            while payload.read(1024 * 1024):
+                pass
         with archive_path.open("rb") as archive_file:
             digest = hashlib.file_digest(archive_file, "sha256").hexdigest()
         manifest["architecture"][arch]["url"] = (

@@ -111,8 +111,10 @@ func ambiguousLegacyContinueRecord(record string) bool {
 func fillCommand(config Config, command string, chunk Chunk, NRemainingJobs int) (string, error) {
 	s, err := _fillCommand(config, command, chunk, NRemainingJobs,
 		fmt.Sprintf("%d", chunk.ID), strconv.Itoa(max(runtime.NumCPU()/config.Jobs, 1)), nil, nil)
-	if err != nil {
-		return s, err
+	// A shell command is one OS argument. Binary records can still be piped
+	// to stdin, and a dry run can print their expanded bytes.
+	if err == nil && !config.DryRun && strings.IndexByte(s, 0) >= 0 {
+		return "", fmt.Errorf("command for job %d contains a NUL byte", chunk.ID)
 	}
 	return s, err
 }

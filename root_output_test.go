@@ -514,3 +514,33 @@ func TestSuccessfulCommandFileRollsBackOnBufferedOutputFailure(t *testing.T) {
 		t.Fatalf("successful-command file=%q; want original %q", got, original)
 	}
 }
+
+func TestNullDeviceAsStandardInput(t *testing.T) {
+	// os/exec supplies the null device when Stdin is nil.
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRushHelperProcess$", "--", "echo unexpected")
+	cmd.Env = append(os.Environ(), "RUSH_TEST_HELPER_PROCESS=1")
+	if output, err := cmd.CombinedOutput(); err != nil || len(output) != 0 {
+		t.Fatalf("null input: output=%q err=%v", output, err)
+	}
+}
+
+func TestNULInExpandedCommandPreservesOutput(t *testing.T) {
+	dir := t.TempDir()
+	output, journal := filepath.Join(dir, "output"), filepath.Join(dir, "journal")
+	if err := os.WriteFile(output, []byte("previous"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	original := encodeSuccessfulCommand("echo old") + endMarkOfCMD
+	if err := os.WriteFile(journal, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runLegacyRush(t, "bad\x00record\nvalid\n", nil, "-c", "-C", journal, "-o", output, "--propagate-exit-status=false", "echo {}")
+	if code != 1 || !strings.Contains(stderr, "job 1 contains a NUL byte") {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	for path, want := range map[string]string{output: "previous", journal: original} {
+		if got, err := os.ReadFile(path); err != nil || string(got) != want {
+			t.Errorf("%s: got %q err=%v, want %q", path, got, err, want)
+		}
+	}
+}

@@ -56,9 +56,7 @@ func TestLinuxLongExecutableExclusions(t *testing.T) {
 			defer controller.Close()
 			cmd := exec.CommandContext(context.Background(), path, "--test-sleep=30s")
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
+			testutil.StartSleeper(t, cmd)
 			waited := make(chan struct{})
 			go func() { _ = cmd.Wait(); close(waited) }()
 			t.Cleanup(func() {

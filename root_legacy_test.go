@@ -957,3 +957,19 @@ func assertLineSet(t *testing.T, got string, want []string) {
 		t.Fatalf("lines=%v; want %v", lines, want)
 	}
 }
+
+func TestContinueOnlyFallsBackToLegacyCommandText(t *testing.T) {
+	journal := t.TempDir() + "/records"
+	// Mixed journals must apply compatibility per record. Both lines look
+	// like expanded job IDs, but only the first came from the old format.
+	records := "echo 1" + endMarkOfCMD + encodeSuccessfulCommand("echo 2") + endMarkOfCMD
+	if err := os.WriteFile(journal, []byte(records), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"2", ""} {
+		stdout, stderr, code := runLegacyRush(t, "a\nb\n", nil, "-j", "1", "-c", "-C", journal, "echo {#}")
+		if code != 0 || normalizedLines(stdout) != want {
+			t.Fatalf("resume: exit=%d stdout=%q stderr=%q; want %q", code, stdout, stderr, want)
+		}
+	}
+}

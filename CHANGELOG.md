@@ -8,6 +8,11 @@
     - Fix Windows timeouts incorrectly returning exit status 1 when a child is still exiting during cleanup.
     - On Windows, avoid stopping unrelated processes whose recorded parent PID has been reused by a newer command.
     - Reject out-of-range Linux process IDs before looking up executable names. [#79](https://github.com/shenwei356/rush/pull/79)
+    - `--continue`: Fix jobs with `{#}` or `{?}` being skipped when a different job saved the same literal command text.
+    - Report NUL bytes in expanded shell commands before starting the affected job. An invalid first job preserves existing output. Binary input remains supported with `--pipe`.
+    - Accept standard input redirected from the null device as empty input.
+    - Go process API: Honor cancellation and forced cleanup requested during startup, reject negative retry counts, and handle missing progress bars and nonpositive output chunk sizes.
+    - Reject damaged Windows release archives and empty executables before updating the Scoop manifest.
 - rush v0.11.1
     - Prevent file-descriptor exhaustion with many jobs or input files.
     - Fix child-process cleanup, executable exclusions, macOS/BSD process names, and hangs during failures, retries, and interrupts.

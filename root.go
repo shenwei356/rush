@@ -33,14 +33,15 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
 	pb "github.com/schollz/progressbar/v3"
 	"github.com/shenwei356/rush/internal/runstate"
 	"github.com/shenwei356/rush/process"
-	"github.com/shenwei356/xopen"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var writeSuccessfulCommandFile = func(w *bufio.Writer, value string) (int, error) { return w.WriteString(value) }
@@ -81,7 +82,8 @@ Homepage: https://github.com/shenwei356/rush
 
 Input:
   - Input could be a list of strings or numbers, e.g., file paths.
-  - Input can be given either from the STDIN or file(s) via the option -i/--infile.
+  - Read records from standard input or from files supplied with -i/--infile.
+    Redirecting standard input from the null device supplies zero records.
   - Some options could be used to defined how the input records are parsed:
     -d, --field-delimiter   field delimiter in records (default "\s+")
     -D, --record-delimiter  record delimiter (default "\n")
@@ -122,6 +124,9 @@ Replacement strings in commands:
   The record file must be regular; concurrent writers and ambiguous or damaged
   records are rejected. Review completed jobs before rebuilding rejected records.
   --dry-run never creates or updates the record file.
+
+  Shell commands cannot contain NUL bytes. Use --pipe to pass binary data to
+  the command's standard input.
 
   Escaping curly brackets "{}":
     {{}}        {}
@@ -201,7 +206,7 @@ Resource limits:
 			return
 		}
 
-		if len(config.Infiles) == 1 && isStdin(config.Infiles[0]) && !xopen.IsStdin() {
+		if len(config.Infiles) == 1 && isStdin(config.Infiles[0]) && term.IsTerminal(int(syscall.Stdin)) {
 			checkError(fmt.Errorf(`STDIN not detected. type "rush -h" for help`))
 		}
 
@@ -239,7 +244,7 @@ Resource limits:
 			config.Verbose = false
 		}
 
-		var succCmds = make(map[string]struct{})
+		var succCmds map[string]bool
 		var hasOlderRecords bool
 		var bfhSuccCmds *bufio.Writer
 		var fhSuccCmds *os.File
@@ -399,7 +404,6 @@ Resource limits:
 				case sig := <-signalChan:
 					if interrupted {
 						state.Force()
-						opts.ForceStop()
 						forcedOutputStop.Store(true)
 						// Release command output, diagnostics, and any logger
 						// holding the logging mutex while its pipe is full.
@@ -623,8 +627,7 @@ Resource limits:
 					return false, nil
 				}
 				// Older successful-command files contain the expanded {#} value.
-				_, ok := succCmds[cmdStr]
-				return ok, nil
+				return succCmds[cmdStr], nil
 			}
 
 			n := config.NRecords

@@ -102,7 +102,7 @@ func encodeSuccessfulCommand(command string) string {
 }
 
 // readSuccCmds also reports records written before numeric job-value tracking.
-func readSuccCmds(file string) (map[string]struct{}, bool) {
+func readSuccCmds(file string) (map[string]bool, bool) {
 	fh, err := os.Open(file)
 	checkError(err)
 	defer fh.Close()
@@ -111,9 +111,10 @@ func readSuccCmds(file string) (map[string]struct{}, bool) {
 
 // readSuccCmdsFrom reads through the locked handle, including on Windows where
 // reopening the path would conflict with our own exclusive byte-range lock.
-func readSuccCmdsFrom(fh *os.File) (map[string]struct{}, bool) {
+func readSuccCmdsFrom(fh *os.File) (map[string]bool, bool) {
 	file := fh.Name()
-	cmds := make(map[string]struct{})
+	// A true value permits matching the expanded command text of older records.
+	cmds := make(map[string]bool)
 	hasOlderRecords := false
 	sep := []byte(endMarkOfCMD)
 	split := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
@@ -145,7 +146,8 @@ func readSuccCmdsFrom(fh *os.File) (map[string]struct{}, bool) {
 			checkError(fmt.Errorf("unsupported successful-command record version in %s", file))
 		}
 		prefix := quotedCommandPrefix
-		if !strings.HasPrefix(record, prefix) {
+		older := !strings.HasPrefix(record, prefix)
+		if older {
 			hasOlderRecords = true
 			prefix = legacyQuotedCommandPrefix
 		}
@@ -166,7 +168,7 @@ func readSuccCmdsFrom(fh *os.File) (map[string]struct{}, bool) {
 			(!strings.HasPrefix(record, continueJobPrefix) && !strings.HasPrefix(record, continueCommandPrefix) && !strings.HasPrefix(record, continuePipePrefix) && !isComposedContinueRecord(record) && ambiguousLegacyContinueRecord(record)) {
 			checkError(fmt.Errorf("ambiguous legacy successful-command record in %s: review completed jobs and rebuild the record file before resuming", file))
 		}
-		cmds[record] = struct{}{}
+		cmds[record] = older || cmds[record]
 	}
 	if err := scanner.Err(); err != nil {
 		checkError(fmt.Errorf("failed to read file %s: %s", file, err))

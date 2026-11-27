@@ -177,16 +177,8 @@ And then:
     
 #### Method 3: Compiling from source
 
-    # download Go from https://go.dev/dl
-    wget https://go.dev/dl/go1.25.14.linux-amd64.tar.gz
-    
-    tar -zxf go1.25.14.linux-amd64.tar.gz -C $HOME/
-    
-    # or 
-    #   echo "export PATH=$PATH:$HOME/go/bin" >> ~/.bashrc
-    #   source ~/.bashrc
-    export PATH=$PATH:$HOME/go/bin
-    
+Install Go 1.26.0 or later using the [Go installation instructions](https://go.dev/doc/install).
+
     git clone https://github.com/shenwei356/rush
     cd rush
     
@@ -224,7 +216,8 @@ Homepage: https://github.com/shenwei356/rush
 
 Input:
   - Input could be a list of strings or numbers, e.g., file paths.
-  - Input can be given either from the STDIN or file(s) via the option -i/--infile.
+  - Read records from standard input or from files supplied with -i/--infile.
+    Redirecting standard input from the null device supplies zero records.
   - Some options could be used to defined how the input records are parsed:
     -d, --field-delimiter   field delimiter in records (default "\s+")
     -D, --record-delimiter  record delimiter (default "\n")
@@ -265,6 +258,9 @@ Replacement strings in commands:
   The record file must be regular; concurrent writers and ambiguous or damaged
   records are rejected. Review completed jobs before rebuilding rejected records.
   --dry-run never creates or updates the record file.
+
+  Shell commands cannot contain NUL bytes. Use --pipe to pass binary data to
+  the command's standard input.
 
   Escaping curly brackets "{}":
     {{}}        {}

@@ -19,9 +19,7 @@ func TestHasProcessNameLongNamesAndZombies(t *testing.T) {
 	name := fmt.Sprintf("rush-name-%x-worker", time.Now().UnixNano())
 	path := testutil.NamedSleeper(t, t.TempDir(), name)
 	cmd := exec.Command(path, "--test-sleep=30s")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
+	testutil.StartSleeper(t, cmd)
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	for _, test := range []struct {
 		name string
