@@ -5,25 +5,20 @@ package process
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/shenwei356/rush/internal/testutil"
 )
+
+func TestMain(m *testing.M) { testutil.SleepMain(m) }
 
 func TestHasProcessNameLongNamesAndZombies(t *testing.T) {
 	name := fmt.Sprintf("rush-name-%x-worker", time.Now().UnixNano())
-	path := filepath.Join(t.TempDir(), name)
-	data, err := os.ReadFile("/bin/sleep")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0700); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command(path, "30")
+	path := testutil.NamedSleeper(t, t.TempDir(), name)
+	cmd := exec.Command(path, "--test-sleep=30s")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

@@ -50,8 +50,8 @@ Major:
   and wait for available system capacity.
 - **Wait before starting jobs**: wait for a named process to appear or disappear,
   optionally requiring the condition to remain satisfied for a specified time.
-- **Safe exit after capturing Ctrl-C**: Linux uses native `SIGINT`/`SIGKILL` signals;
-  Windows uses `Ctrl+C`/`Ctrl+Break` followed by `taskkill /T /F` to terminate the process tree.
+- **Safe exit after capturing Ctrl-C**. Linux uses `SIGINT` followed by `SIGKILL`.
+  Windows sends `Ctrl+Break` to each command group, then terminates remaining processes in its tree.
 - **Continue** (`-c`). (`--resume --joblog` in GNU parallel,
   ***<s/>sut it does not support multi-line commands, which are common in workflow</s>***)
 - **`awk -v` like custom defined variables** (`-v`). (***Using Shell variable in GNU parallel***)

@@ -81,6 +81,25 @@ func TestWindowsCleanupHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestWindowsTreeRejectsReusedParentPID(t *testing.T) {
+	root := windowsProcess{pid: 10, identity: 100}
+	all := map[uint32]windowsProcess{
+		10: root,
+		11: {pid: 11, ppid: 10, identity: 90},  // Child of the previous PID 10.
+		12: {pid: 12, ppid: 11, identity: 120}, // Its child is unrelated too.
+		13: {pid: 13, ppid: 10, identity: 100}, // Creation timestamps can tie.
+		14: {pid: 14, ppid: 13, identity: 130},
+	}
+	known := map[uint32]windowsProcess{root.pid: root}
+	addWindowsDescendants(known, all)
+	for pid := range all {
+		_, found := known[pid]
+		if want := pid == 10 || pid == 13 || pid == 14; found != want {
+			t.Errorf("pid %d included=%t, want %t", pid, found, want)
+		}
+	}
+}
+
 func TestWindowsForceCleanupContinuesAfterMemberFailure(t *testing.T) {
 	for _, mode := range []string{"denied", "exited", "identity"} {
 		t.Run(mode, func(t *testing.T) {

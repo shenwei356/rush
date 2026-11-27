@@ -5,6 +5,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,6 +15,9 @@ import (
 
 // linuxProcessName resolves names that may be truncated in /proc/PID/stat.
 var linuxProcessName = func(ctx context.Context, pid int) (string, error) {
+	if pid <= 0 || pid > math.MaxInt32 {
+		return "", fmt.Errorf("pid out of int32 range: %d", pid)
+	}
 	return (&ps.Process{Pid: int32(pid)}).NameWithContext(ctx)
 }
 

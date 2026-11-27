@@ -6,6 +6,8 @@
     - Explain `--delay`, `--load`, and `--memfree` in help; reorganize the usage guide into sections for process waiting, resource limits, and progress reporting.
     - `--eta`: Show total elapsed time when the progress bar completes.
     - Fix Windows timeouts incorrectly returning exit status 1 when a child is still exiting during cleanup.
+    - On Windows, avoid stopping unrelated processes whose recorded parent PID has been reused by a newer command.
+    - Reject out-of-range Linux process IDs before looking up executable names. [#79](https://github.com/shenwei356/rush/pull/79)
 - rush v0.11.1
     - Prevent file-descriptor exhaustion with many jobs or input files.
     - Fix child-process cleanup, executable exclusions, macOS/BSD process names, and hangs during failures, retries, and interrupts.

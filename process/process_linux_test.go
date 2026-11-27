@@ -7,11 +7,12 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/shenwei356/rush/internal/testutil"
 )
 
 func TestLinuxProcessExitSnapshot(t *testing.T) {
@@ -36,19 +37,8 @@ func TestLinuxProcessExitSnapshot(t *testing.T) {
 }
 
 func TestLinuxLongExecutableExclusions(t *testing.T) {
-	sleepPath, err := exec.LookPath("sleep")
-	if err != nil {
-		t.Fatal(err)
-	}
-	program, err := os.ReadFile(sleepPath)
-	if err != nil {
-		t.Fatal(err)
-	}
 	const name = "rush-long-running-worker"
-	path := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(path, program, 0700); err != nil {
-		t.Fatal(err)
-	}
+	path := testutil.NamedSleeper(t, t.TempDir(), name)
 	for _, phase := range []string{"graceful", "force", "unrelated", "empty"} {
 		t.Run(phase, func(t *testing.T) {
 			opts := &Options{NoStopExes: []string{"all"}, NoKillExes: []string{name}}
@@ -64,7 +54,7 @@ func TestLinuxLongExecutableExclusions(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer controller.Close()
-			cmd := exec.CommandContext(context.Background(), path, "30")
+			cmd := exec.CommandContext(context.Background(), path, "--test-sleep=30s")
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)

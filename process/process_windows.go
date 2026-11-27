@@ -202,6 +202,12 @@ func refreshWindowsTree(root windowsRecord, known map[uint32]windowsProcess) err
 	if p, ok := all[root.pid]; ok && p.identity != root.identity {
 		return fmt.Errorf("process identity changed for pid %d", root.pid)
 	}
+	addWindowsDescendants(known, all)
+	return nil
+}
+
+// addWindowsDescendants extends the known tree using one process snapshot.
+func addWindowsDescendants(known, all map[uint32]windowsProcess) {
 	for {
 		added := false
 		for pid, p := range all {
@@ -214,7 +220,8 @@ func refreshWindowsTree(root windowsRecord, known map[uint32]windowsProcess) err
 				}
 				continue
 			}
-			if parent, ok := known[p.ppid]; ok {
+			// A stale parent PID can point to a newer, unrelated process.
+			if parent, ok := known[p.ppid]; ok && parent.identity <= p.identity {
 				if current, exists := all[parent.pid]; !exists || current.identity == parent.identity {
 					known[pid] = p
 					added = true
@@ -225,7 +232,6 @@ func refreshWindowsTree(root windowsRecord, known map[uint32]windowsProcess) err
 			break
 		}
 	}
-	return nil
 }
 func windowsProcessAlive(expected windowsProcess) (bool, error) {
 	h, id, err := openIdentifiedProcess(expected.pid, windows.SYNCHRONIZE)

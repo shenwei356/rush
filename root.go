@@ -26,6 +26,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"regexp"
@@ -62,7 +63,7 @@ func rollbackSuccessfulCommands(w *bufio.Writer, f *os.File, size int64) error {
 	if err := truncateSuccessfulCommandFile(f, size); err != nil {
 		return err
 	}
-	_, err := seekSuccessfulCommandFile(f, 0, os.SEEK_END)
+	_, err := seekSuccessfulCommandFile(f, 0, io.SeekEnd)
 	return err
 }
 

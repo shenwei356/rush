@@ -12,7 +12,11 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/shenwei356/rush/internal/testutil"
 )
+
+func TestMain(m *testing.M) { testutil.SleepMain(m) }
 
 func TestProcessWaitBeforeAllJobs(t *testing.T) {
 	for _, test := range []struct {
@@ -21,16 +25,9 @@ func TestProcessWaitBeforeAllJobs(t *testing.T) {
 		t.Run(fmt.Sprintf("appear=%t/regexp=%t", test.appear, test.regexp), func(t *testing.T) {
 			dir := t.TempDir()
 			name := fmt.Sprintf("rush-wait-%x-worker", time.Now().UnixNano())
-			worker := filepath.Join(dir, name)
-			data, err := os.ReadFile("/bin/sleep")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(worker, data, 0700); err != nil {
-				t.Fatal(err)
-			}
+			worker := testutil.NamedSleeper(t, dir, name)
 			startWorker := func() *exec.Cmd {
-				p := exec.Command(worker, "30")
+				p := exec.Command(worker, "--test-sleep=30s")
 				if err := p.Start(); err != nil {
 					t.Fatal(err)
 				}
@@ -59,7 +56,7 @@ func TestProcessWaitBeforeAllJobs(t *testing.T) {
 			}
 			// Jobs reuse the watched name: after the initial release they must
 			// run normally, without reapplying the disappearance condition.
-			command := shellQuote(worker) + " 0.1; echo {}"
+			command := shellQuote(worker) + " --test-sleep=100ms && echo {}"
 			args := append(matchFlags, "--verbose", flag, pattern, "-u", "0.1", "-U", "0.1", "-k", "-j", "2", "-c", "-C", journal, "-o", output, command)
 			cmd := rushTestCommand(t, "1\n2\n3\n", args...)
 			if err := cmd.Start(); err != nil {

@@ -120,7 +120,15 @@ func runWindowsConsoleLifecycle(t *testing.T, cleanup time.Duration, second bool
 	// Give more time on CI for process startup
 	waitWindowsEvent(t, ready, 15*time.Second, "child ready")
 	childPID := readWindowsPID(t, pidFile)
-	t.Cleanup(func() { terminateWindowsPID(childPID) })
+	// Keep the handle through cleanup so a reused PID cannot target a later test.
+	child, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE, false, childPID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = windows.TerminateProcess(child, 1)
+		_ = windows.CloseHandle(child)
+	})
 
 	sendWindowsCtrlC(t, cmd.Process.Pid)
 	waitWindowsEvent(t, breakEvent, 8*time.Second, "directed CTRL_BREAK_EVENT")
@@ -139,8 +147,8 @@ func runWindowsConsoleLifecycle(t *testing.T, cleanup time.Duration, second bool
 	if _, err := os.Stat(queuedFile); !os.IsNotExist(err) {
 		t.Fatalf("queued command ran: %v", err)
 	}
-	if windowsPIDAlive(childPID) {
-		t.Fatalf("ordinary descendant %d is still alive", childPID)
+	if status, err := windows.WaitForSingleObject(child, 0); err != nil || status != windows.WAIT_OBJECT_0 {
+		t.Fatalf("ordinary descendant %d did not exit: wait status=%d err=%v", childPID, status, err)
 	}
 }
 
@@ -212,24 +220,6 @@ func readWindowsPID(t *testing.T, path string) uint32 {
 		t.Fatal(err)
 	}
 	return uint32(pid)
-}
-
-func windowsPIDAlive(pid uint32) bool {
-	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
-	if err != nil {
-		return false
-	}
-	defer windows.CloseHandle(h)
-	status, err := windows.WaitForSingleObject(h, 0)
-	return err == nil && status == uint32(windows.WAIT_TIMEOUT)
-}
-
-func terminateWindowsPID(pid uint32) {
-	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)
-	if err == nil {
-		_ = windows.TerminateProcess(h, 1)
-		_ = windows.CloseHandle(h)
-	}
 }
 
 func windowsHelperExit(action string, err error) {
